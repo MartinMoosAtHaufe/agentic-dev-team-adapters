@@ -8,6 +8,7 @@ import {
 	mapAgentTools,
 	loadModelTierConfig,
 	buildChildArgs,
+	formatToolCall,
 	DEFAULT_MODEL_TIERS,
 } from "../src/subagent/mapping.ts";
 
@@ -146,4 +147,21 @@ test("buildChildArgs produces correct CLI arguments", () => {
 		"--model",
 		"gpt-5.6-luna",
 	]);
+});
+
+test("formatToolCall formats commands and paths accurately", () => {
+	const rawTheme = (_color, text) => text;
+	assert.equal(formatToolCall("bash", { command: "echo test" }, rawTheme), "$ echo test");
+	assert.equal(
+		formatToolCall("bash", { command: "a".repeat(70) }, rawTheme),
+		`$ ${"a".repeat(60)}...`
+	);
+	assert.equal(formatToolCall("read", { path: "src/index.ts", offset: 5, limit: 10 }, rawTheme), "read src/index.ts:5-14");
+	assert.equal(formatToolCall("read", { path: "src/index.ts", offset: 5 }, rawTheme), "read src/index.ts:5");
+	assert.equal(formatToolCall("write", { path: "hello.txt", content: "foo\nbar" }, rawTheme), "write hello.txt (2 lines)");
+	assert.equal(formatToolCall("edit", { path: "hello.txt" }, rawTheme), "edit hello.txt");
+	assert.equal(formatToolCall("ls", { path: "dir" }, rawTheme), "ls dir");
+	assert.equal(formatToolCall("find", { pattern: "*.ts", path: "src" }, rawTheme), "find *.ts in src");
+	assert.equal(formatToolCall("grep", { pattern: "TODO", path: "src" }, rawTheme), "grep /TODO/ in src");
+	assert.equal(formatToolCall("custom", { a: "b" }, rawTheme), 'custom {"a":"b"}');
 });
