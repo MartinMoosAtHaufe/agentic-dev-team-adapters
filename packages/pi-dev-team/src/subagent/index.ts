@@ -29,7 +29,7 @@ import {
 import { Container, Markdown, Spacer, Text } from "@earendil-works/pi-tui";
 import { Type } from "typebox";
 import { type AgentConfig, type AgentScope, discoverAgents } from "./agents.ts";
-import { loadModelTierConfig, mapAgentTools, resolveAgentModel } from "./mapping.ts";
+import { buildChildArgs, loadModelTierConfig, mapAgentTools, resolveAgentModel } from "./mapping.ts";
 
 const MAX_PARALLEL_TASKS = 8;
 const MAX_CONCURRENCY = 4;
@@ -301,12 +301,17 @@ async function runSingleAgent(
 	const args: string[] = ["--mode", "json", "-p", "--no-session"];
 	const tierConfig = loadModelTierConfig(cwd ?? defaultCwd);
 	const model = resolveAgentModel(agent.model, tierConfig, dispatchDefaults.model);
-	if (model) args.push("--model", model);
+	const mappedTools = mapAgentTools(agent.tools);
+
+	const childArgs = buildChildArgs({
+		model,
+		tools: mappedTools,
+	});
+	args.push(...childArgs);
+
 	if (dispatchDefaults.thinkingLevel) {
 		args.push("--thinking", dispatchDefaults.thinkingLevel);
 	}
-	const mappedTools = mapAgentTools(agent.tools);
-	if (mappedTools && mappedTools.length > 0) args.push("--tools", mappedTools.join(","));
 
 	let tmpPromptDir: string | null = null;
 	let tmpPromptPath: string | null = null;
