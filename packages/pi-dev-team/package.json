@@ -1,0 +1,22 @@
+{
+  "name": "@earendil-works/pi-dev-team",
+  "version": "13.1.0",
+  "description": "Pi Coding Agent port of the dev-team persona-driven AI development plugin",
+  "type": "module",
+  "main": "src/index.js",
+  "keywords": [
+    "pi-package",
+    "pi-extension"
+  ],
+  "pi": {
+    "extensions": [
+      "./src/index.js"
+    ],
+    "skills": [
+      "../../plugins/dev-team/skills/*"
+    ]
+  },
+  "scripts": {
+    "test": "node --test test/index.test.mjs"
+  }
+}
