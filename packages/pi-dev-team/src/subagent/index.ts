@@ -29,6 +29,7 @@ import {
 import { Container, Markdown, Spacer, Text } from "@earendil-works/pi-tui";
 import { Type } from "typebox";
 import { type AgentConfig, type AgentScope, discoverAgents } from "./agents.ts";
+import { loadModelTierConfig, mapAgentTools, resolveAgentModel } from "./mapping.ts";
 
 const MAX_PARALLEL_TASKS = 8;
 const MAX_CONCURRENCY = 4;
@@ -298,17 +299,14 @@ async function runSingleAgent(
 	}
 
 	const args: string[] = ["--mode", "json", "-p", "--no-session"];
-	// If agent frontmatter specifies a Claude alias (opus, sonnet, haiku) or provider Bedrock/Anthropic
-	// that is not configured, fall back to current session's model (dispatchDefaults.model)
-	let model = dispatchDefaults.model;
-	if (agent.model && !agent.model.includes("opus") && !agent.model.includes("sonnet") && !agent.model.includes("haiku")) {
-		model = agent.model;
-	}
+	const tierConfig = loadModelTierConfig(cwd ?? defaultCwd);
+	const model = resolveAgentModel(agent.model, tierConfig, dispatchDefaults.model);
 	if (model) args.push("--model", model);
 	if (dispatchDefaults.thinkingLevel) {
 		args.push("--thinking", dispatchDefaults.thinkingLevel);
 	}
-	if (agent.tools && agent.tools.length > 0) args.push("--tools", agent.tools.join(","));
+	const mappedTools = mapAgentTools(agent.tools);
+	if (mappedTools && mappedTools.length > 0) args.push("--tools", mappedTools.join(","));
 
 	let tmpPromptDir: string | null = null;
 	let tmpPromptPath: string | null = null;

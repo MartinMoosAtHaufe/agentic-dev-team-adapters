@@ -87,7 +87,7 @@ export function resolveAgentModel(
 	fallbackModel?: string,
 	builtInDefaults: { light?: string; medium?: string } = DEFAULT_MODEL_TIERS,
 ): string | undefined {
-	if (!requestedModel) return fallbackModel;
+	if (!requestedModel || !requestedModel.trim()) return fallbackModel;
 
 	const lower = requestedModel.toLowerCase().trim();
 
@@ -170,6 +170,10 @@ export function buildChildArgs(options: {
 
 	if (options.tools && options.tools.length > 0) {
 		args.push("--tools", options.tools.join(","));
+	}
+
+	if (options.cwd) {
+		args.push("--cwd", options.cwd);
 	}
 
 	return args;
