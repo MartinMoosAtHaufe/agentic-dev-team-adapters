@@ -1,6 +1,6 @@
 import * as path from "node:path";
 import * as fs from "node:fs";
-import { spawn, execSync } from "node:child_process";
+import { spawn, spawnSync } from "node:child_process";
 import { fileURLToPath } from "node:url";
 
 const __filename = fileURLToPath(import.meta.url);
@@ -22,12 +22,15 @@ export function resolvePython() {
 
   for (const candidate of candidates) {
     try {
-      execSync(`${candidate} -c "import sys; sys.exit(0 if sys.version_info.major >= 3 else 1)"`, {
+      const res = spawnSync(candidate, ["-c", "import sys; sys.exit(0 if sys.version_info >= (3, 10) else 1)"], {
         stdio: ["ignore", "ignore", "ignore"],
         windowsHide: true,
+        shell: false,
       });
-      cachedPythonBin = candidate;
-      return candidate;
+      if (res.status === 0) {
+        cachedPythonBin = candidate;
+        return candidate;
+      }
     } catch {
       continue;
     }
@@ -112,6 +115,7 @@ export async function runHookScript(scriptRelPath, pluginRoot, payload) {
       env: {
         ...process.env,
         PYTHONIOENCODING: "utf-8",
+        CLAUDE_PLUGIN_ROOT: pluginRoot,
         CLAUDE_PROJECT_DIR: payload.cwd || process.cwd(),
         CLAUDE_TOOL_NAME: payload.tool_name || "",
       },
@@ -130,6 +134,10 @@ export async function runHookScript(scriptRelPath, pluginRoot, payload) {
 
     proc.stderr.on("data", (data) => {
       stderr += data;
+    });
+
+    proc.stdin.on("error", () => {
+      // Ignore EPIPE
     });
 
     proc.on("error", (err) => {
@@ -155,7 +163,7 @@ export function extractScriptPath(commandStr) {
 }
 
 export default function devTeamPlugin(pi) {
-  const pluginRoot = path.resolve(__dirname, "../../../plugins/dev-team");
+  const pluginRoot = process.env.DEV_TEAM_PLUGIN_ROOT || path.resolve(__dirname, "../../../plugins/dev-team");
   const settingsPath = path.join(pluginRoot, "settings.json");
 
   let settingsHooks = {};
@@ -191,7 +199,7 @@ export default function devTeamPlugin(pi) {
         if (res.exitCode === 2) {
           return {
             blocked: true,
-            reason: res.stdout.trim() || `Blocked by hook: ${scriptRel}`,
+            reason: res.stderr.trim() || res.stdout.trim() || `Blocked by hook: ${scriptRel}`,
           };
         }
 

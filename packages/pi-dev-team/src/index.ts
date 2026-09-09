@@ -1,7 +1,7 @@
 import type { ExtensionAPI, ExtensionContext } from "@earendil-works/pi-coding-agent";
 import * as path from "node:path";
 import * as fs from "node:fs";
-import { spawn } from "node:child_process";
+import { spawn, spawnSync } from "node:child_process";
 
 export interface HookEntry {
   matcher?: string;
@@ -41,13 +41,15 @@ export function resolvePython(): string {
 
   for (const candidate of candidates) {
     try {
-      const { execSync } = require("node:child_process");
-      const out = execSync(`${candidate} -c "import sys; sys.exit(0 if sys.version_info.major >= 3 else 1)"`, {
+      const res = spawnSync(candidate, ["-c", "import sys; sys.exit(0 if sys.version_info >= (3, 10) else 1)"], {
         stdio: ["ignore", "ignore", "ignore"],
         windowsHide: true,
+        shell: false,
       });
-      cachedPythonBin = candidate;
-      return candidate;
+      if (res.status === 0) {
+        cachedPythonBin = candidate;
+        return candidate;
+      }
     } catch {
       continue;
     }
@@ -145,6 +147,7 @@ export async function runHookScript(
       env: {
         ...process.env,
         PYTHONIOENCODING: "utf-8",
+        CLAUDE_PLUGIN_ROOT: pluginRoot,
         CLAUDE_PROJECT_DIR: payload.cwd || process.cwd(),
         CLAUDE_TOOL_NAME: payload.tool_name || "",
       },
@@ -163,6 +166,10 @@ export async function runHookScript(
 
     proc.stderr.on("data", (data) => {
       stderr += data;
+    });
+
+    proc.stdin.on("error", () => {
+      // Ignore EPIPE / stream errors when process exits early
     });
 
     proc.on("error", (err) => {
@@ -193,7 +200,7 @@ export function extractScriptPath(commandStr: string): string | null {
 
 export default function devTeamPlugin(pi: ExtensionAPI) {
   // Locate plugin root directory
-  const pluginRoot = path.resolve(__dirname, "../../../plugins/dev-team");
+  const pluginRoot = process.env.DEV_TEAM_PLUGIN_ROOT || path.resolve(__dirname, "../../../plugins/dev-team");
   const settingsPath = path.join(pluginRoot, "settings.json");
 
   let settingsHooks: SettingsHooks = {};
@@ -236,7 +243,7 @@ export default function devTeamPlugin(pi: ExtensionAPI) {
         if (res.exitCode === 2) {
           return {
             blocked: true,
-            reason: res.stdout.trim() || `Blocked by hook: ${scriptRel}`,
+            reason: res.stderr.trim() || res.stdout.trim() || `Blocked by hook: ${scriptRel}`,
           };
         }
 

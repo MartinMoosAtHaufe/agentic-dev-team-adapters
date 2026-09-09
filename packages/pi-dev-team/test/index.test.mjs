@@ -64,6 +64,10 @@ test("runHookScript executes Python destructive_guard with allow and block", asy
   }
   const pluginRoot = path.join(repoRoot, "plugins/dev-team");
 
+  // Test resolvePython
+  const pythonBin = resolvePython();
+  assert.ok(typeof pythonBin === "string" && pythonBin.length > 0);
+
   // Safe command -> exit 0
   const safeRes = await runHookScript("hooks/destructive_guard.py", pluginRoot, {
     cwd: repoRoot,
