@@ -37,8 +37,8 @@ import {
 	resolveAgentModel,
 } from "./mapping.ts";
 
-const MAX_PARALLEL_TASKS = 8;
-const MAX_CONCURRENCY = 4;
+const MAX_PARALLEL_TASKS = 16;
+const MAX_CONCURRENCY = 10;
 const COLLAPSED_ITEM_COUNT = 10;
 const PER_TASK_OUTPUT_CAP = 50 * 1024;
 
