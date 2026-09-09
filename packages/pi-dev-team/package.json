@@ -4,14 +4,14 @@
   "description": "Pi Coding Agent port of the dev-team persona-driven AI development plugin",
   "author": "Martin Moos",
   "type": "module",
-  "main": "src/index.js",
+  "main": "src/index.ts",
   "keywords": [
     "pi-package",
     "pi-extension"
   ],
   "pi": {
     "extensions": [
-      "./src/index.js",
+      "./src/index.ts",
       "./src/subagent/index.ts"
     ],
     "skills": [
@@ -19,7 +19,7 @@
     ]
   },
   "scripts": {
-    "test": "node --test test/index.test.mjs"
+    "test": "node --experimental-strip-types --test test/index.test.mjs"
   },
   "peerDependencies": {
     "@earendil-works/pi-coding-agent": "*"

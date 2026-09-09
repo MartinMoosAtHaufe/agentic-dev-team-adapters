@@ -10,7 +10,7 @@ import {
   runHookScript,
   parseHookOutput,
   default as devTeamPlugin
-} from "../src/index.js";
+} from "../src/index.ts";
 
 test("mapPiToolToClaude maps tools properly", () => {
   const bashMap = mapPiToolToClaude("bash", { command: "ls -la" });
