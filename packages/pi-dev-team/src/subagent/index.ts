@@ -331,7 +331,6 @@ async function runSingleAgent(
 				}
 
 				if (event.type === "message_end" && event.message) {
-					currentResult.activeToolCall = undefined;
 					const msg = event.message as Message;
 					currentResult.messages.push(msg);
 
