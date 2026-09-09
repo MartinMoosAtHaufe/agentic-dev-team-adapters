@@ -298,10 +298,14 @@ async function runSingleAgent(
 	}
 
 	const args: string[] = ["--mode", "json", "-p", "--no-session"];
-	const inheritsDispatchConfig = !agent.model;
-	const model = agent.model ?? dispatchDefaults.model;
+	// If agent frontmatter specifies a Claude alias (opus, sonnet, haiku) or provider Bedrock/Anthropic
+	// that is not configured, fall back to current session's model (dispatchDefaults.model)
+	let model = dispatchDefaults.model;
+	if (agent.model && !agent.model.includes("opus") && !agent.model.includes("sonnet") && !agent.model.includes("haiku")) {
+		model = agent.model;
+	}
 	if (model) args.push("--model", model);
-	if (inheritsDispatchConfig && dispatchDefaults.thinkingLevel) {
+	if (dispatchDefaults.thinkingLevel) {
 		args.push("--thinking", dispatchDefaults.thinkingLevel);
 	}
 	if (agent.tools && agent.tools.length > 0) args.push("--tools", agent.tools.join(","));

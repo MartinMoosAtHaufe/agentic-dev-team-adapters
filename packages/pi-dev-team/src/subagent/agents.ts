@@ -14,7 +14,7 @@ export interface AgentConfig {
 	tools?: string[];
 	model?: string;
 	systemPrompt: string;
-	source: "user" | "project";
+	source: "user" | "project" | "plugin";
 	filePath: string;
 }
 
@@ -59,7 +59,7 @@ function parseToolList(value: unknown): string[] | undefined {
 	return tools.length > 0 ? tools : undefined;
 }
 
-function loadAgentsFromDir(dir: string, source: "user" | "project"): AgentConfig[] {
+function loadAgentsFromDir(dir: string, source: "user" | "project" | "plugin"): AgentConfig[] {
 	const agents: AgentConfig[] = [];
 
 	if (!fs.existsSync(dir)) {
@@ -129,9 +129,12 @@ export function discoverAgents(cwd: string, scope: AgentScope): AgentDiscoveryRe
 	const userDir = path.join(getAgentDir(), "agents");
 	const projectAgentsDir = findNearestProjectAgentsDir(cwd);
 
-	// Also discover plugin-shipped agents from dev-team
-	const pluginAgentsDir = path.resolve(__dirname, "../../../plugins/dev-team/agents");
-	const pluginAgents = loadAgentsFromDir(pluginAgentsDir, "project");
+  // Also discover plugin-shipped agents from dev-team
+  // Support both src/subagent/ (4 levels up) and compiled dist/ or similar paths
+  const pluginAgentsDir = path.resolve(__dirname, "../../../../plugins/dev-team/agents");
+  const fallbackPluginAgentsDir = path.resolve(__dirname, "../../../plugins/dev-team/agents");
+  const resolvedPluginAgentsDir = fs.existsSync(pluginAgentsDir) ? pluginAgentsDir : fallbackPluginAgentsDir;
+  const pluginAgents = loadAgentsFromDir(resolvedPluginAgentsDir, "plugin");
 
 	const userAgents = scope === "project" ? [] : loadAgentsFromDir(userDir, "user");
 	const projectAgents = scope === "user" || !projectAgentsDir ? [] : loadAgentsFromDir(projectAgentsDir, "project");
