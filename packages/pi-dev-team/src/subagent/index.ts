@@ -747,21 +747,21 @@ export default function (pi: ExtensionAPI) {
 
 			const mdTheme = getMarkdownTheme();
 
-			const renderDisplayItems = (items: DisplayItem[], limit?: number, activeToolCall?: { name: string; args: Record<string, unknown> }) => {
+			const renderDisplayItems = (items: DisplayItem[], limit?: number, isRunning?: boolean) => {
 				const toShow = limit ? items.slice(-limit) : items;
 				const skipped = limit && items.length > limit ? items.length - limit : 0;
 				let text = "";
 				if (skipped > 0) text += theme.fg("muted", `... ${skipped} earlier items\n`);
-				for (const item of toShow) {
+				for (let i = 0; i < toShow.length; i++) {
+					const item = toShow[i];
+					const isLatestInFlight = isRunning && i === toShow.length - 1;
 					if (item.type === "text") {
 						const preview = expanded ? item.text : item.text.split("\n").slice(0, 3).join("\n");
 						text += `${theme.fg("toolOutput", preview)}\n`;
 					} else {
-						text += `${theme.fg("muted", "→ ") + formatToolCall(item.name, item.args, theme.fg.bind(theme))}\n`;
+						const prefix = isLatestInFlight ? theme.fg("accent", "→ ") : theme.fg("muted", "→ ");
+						text += `${prefix + formatToolCall(item.name, item.args, theme.fg.bind(theme))}\n`;
 					}
-				}
-				if (activeToolCall) {
-					text += `${theme.fg("warning", "⚡ ") + formatToolCall(activeToolCall.name, activeToolCall.args, theme.fg.bind(theme))}\n`;
 				}
 				return text.trimEnd();
 			};
@@ -770,7 +770,7 @@ export default function (pi: ExtensionAPI) {
 				const r = details.results[0];
 				const isRunning = r.exitCode === -1;
 				const isError = isFailedResult(r);
-				const icon = isRunning ? theme.fg("warning", "⏳") : isError ? theme.fg("error", "✗") : theme.fg("success", "✓");
+				const icon = isRunning ? theme.fg("warning", "⚡") : isError ? theme.fg("error", "✗") : theme.fg("success", "✓");
 				const displayItems = getDisplayItems(r.messages);
 				const finalOutput = getFinalOutput(r.messages);
 
@@ -786,27 +786,22 @@ export default function (pi: ExtensionAPI) {
 					container.addChild(new Text(theme.fg("dim", r.task), 0, 0));
 					container.addChild(new Spacer(1));
 					container.addChild(new Text(theme.fg("muted", "─── Output ───"), 0, 0));
-					if (displayItems.length === 0 && !finalOutput && !r.activeToolCall) {
+					if (displayItems.length === 0 && !finalOutput) {
 						container.addChild(new Text(theme.fg("muted", isRunning ? "(running...)" : "(no output)"), 0, 0));
 					} else {
-						for (const item of displayItems) {
-							if (item.type === "toolCall")
+						for (let i = 0; i < displayItems.length; i++) {
+							const item = displayItems[i];
+							if (item.type === "toolCall") {
+								const isLatestInFlight = isRunning && i === displayItems.length - 1;
+								const prefix = isLatestInFlight ? theme.fg("accent", "→ ") : theme.fg("muted", "→ ");
 								container.addChild(
 									new Text(
-										theme.fg("muted", "→ ") + formatToolCall(item.name, item.args, theme.fg.bind(theme)),
+										prefix + formatToolCall(item.name, item.args, theme.fg.bind(theme)),
 										0,
 										0,
 									),
 								);
-						}
-						if (r.activeToolCall) {
-							container.addChild(
-								new Text(
-									theme.fg("warning", "⚡ ") + formatToolCall(r.activeToolCall.name, r.activeToolCall.args, theme.fg.bind(theme)),
-									0,
-									0,
-								),
-							);
+							}
 						}
 						if (finalOutput) {
 							container.addChild(new Spacer(1));
@@ -824,9 +819,9 @@ export default function (pi: ExtensionAPI) {
 				let text = `${icon} ${theme.fg("toolTitle", theme.bold(r.agent))}${theme.fg("muted", ` (${r.agentSource})`)}`;
 				if (isError && r.stopReason) text += ` ${theme.fg("error", `[${r.stopReason}]`)}`;
 				if (isError && r.errorMessage) text += `\n${theme.fg("error", `Error: ${r.errorMessage}`)}`;
-				else if (displayItems.length === 0 && !r.activeToolCall) text += `\n${theme.fg("muted", isRunning ? "(running...)" : "(no output)")}`;
+				else if (displayItems.length === 0) text += `\n${theme.fg("muted", isRunning ? "(running...)" : "(no output)")}`;
 				else {
-					text += `\n${renderDisplayItems(displayItems, COLLAPSED_ITEM_COUNT, r.activeToolCall)}`;
+					text += `\n${renderDisplayItems(displayItems, COLLAPSED_ITEM_COUNT, isRunning)}`;
 					if (displayItems.length > COLLAPSED_ITEM_COUNT) text += `\n${theme.fg("muted", "(Ctrl+O to expand)")}`;
 				}
 				const usageStr = formatUsageStats(r.usage, r.model);
@@ -866,7 +861,7 @@ export default function (pi: ExtensionAPI) {
 
 					for (const r of details.results) {
 						const isStepRunning = r.exitCode === -1;
-						const rIcon = isStepRunning ? theme.fg("warning", "⏳") : r.exitCode === 0 ? theme.fg("success", "✓") : theme.fg("error", "✗");
+						const rIcon = isStepRunning ? theme.fg("warning", "⚡") : r.exitCode === 0 ? theme.fg("success", "✓") : theme.fg("error", "✗");
 						const displayItems = getDisplayItems(r.messages);
 						const finalOutput = getFinalOutput(r.messages);
 
@@ -881,26 +876,19 @@ export default function (pi: ExtensionAPI) {
 						container.addChild(new Text(theme.fg("muted", "Task: ") + theme.fg("dim", r.task), 0, 0));
 
 						// Show tool calls
-						for (const item of displayItems) {
+						for (let i = 0; i < displayItems.length; i++) {
+							const item = displayItems[i];
 							if (item.type === "toolCall") {
+								const isLatestInFlight = isStepRunning && i === displayItems.length - 1;
+								const prefix = isLatestInFlight ? theme.fg("accent", "→ ") : theme.fg("muted", "→ ");
 								container.addChild(
 									new Text(
-										theme.fg("muted", "→ ") + formatToolCall(item.name, item.args, theme.fg.bind(theme)),
+										prefix + formatToolCall(item.name, item.args, theme.fg.bind(theme)),
 										0,
 										0,
 									),
 								);
 							}
-						}
-
-						if (r.activeToolCall) {
-							container.addChild(
-								new Text(
-									theme.fg("warning", "⚡ ") + formatToolCall(r.activeToolCall.name, r.activeToolCall.args, theme.fg.bind(theme)),
-									0,
-									0,
-								),
-							);
 						}
 
 						// Show final output as markdown
@@ -929,11 +917,11 @@ export default function (pi: ExtensionAPI) {
 					theme.fg("accent", `${successCount}/${details.results.length} steps`);
 				for (const r of details.results) {
 					const isStepRunning = r.exitCode === -1;
-					const rIcon = isStepRunning ? theme.fg("warning", "⏳") : r.exitCode === 0 ? theme.fg("success", "✓") : theme.fg("error", "✗");
+					const rIcon = isStepRunning ? theme.fg("warning", "⚡") : r.exitCode === 0 ? theme.fg("success", "✓") : theme.fg("error", "✗");
 					const displayItems = getDisplayItems(r.messages);
 					text += `\n\n${theme.fg("muted", `─── Step ${r.step}: `)}${theme.fg("accent", r.agent)} ${rIcon}`;
-					if (displayItems.length === 0 && !r.activeToolCall) text += `\n${theme.fg("muted", isStepRunning ? "(running...)" : "(no output)")}`;
-					else text += `\n${renderDisplayItems(displayItems, 5, r.activeToolCall)}`;
+					if (displayItems.length === 0) text += `\n${theme.fg("muted", isStepRunning ? "(running...)" : "(no output)")}`;
+					else text += `\n${renderDisplayItems(displayItems, 5, isStepRunning)}`;
 				}
 				const usageStr = formatUsageStats(aggregateUsage(details.results));
 				if (usageStr) text += `\n\n${theme.fg("dim", `Total: ${usageStr}`)}`;
@@ -947,7 +935,7 @@ export default function (pi: ExtensionAPI) {
 				const failCount = details.results.filter((r) => r.exitCode !== -1 && isFailedResult(r)).length;
 				const isRunning = running > 0;
 				const icon = isRunning
-					? theme.fg("warning", "⏳")
+					? theme.fg("warning", "⚡")
 					: failCount > 0
 						? theme.fg("warning", "◐")
 						: theme.fg("success", "✓");
@@ -977,7 +965,8 @@ export default function (pi: ExtensionAPI) {
 						container.addChild(new Text(theme.fg("muted", "Task: ") + theme.fg("dim", r.task), 0, 0));
 
 						// Show tool calls
-						for (const item of displayItems) {
+						for (let i = 0; i < displayItems.length; i++) {
+							const item = displayItems[i];
 							if (item.type === "toolCall") {
 								container.addChild(
 									new Text(
@@ -987,16 +976,6 @@ export default function (pi: ExtensionAPI) {
 									),
 								);
 							}
-						}
-
-						if (r.activeToolCall) {
-							container.addChild(
-								new Text(
-									theme.fg("warning", "⚡ ") + formatToolCall(r.activeToolCall.name, r.activeToolCall.args, theme.fg.bind(theme)),
-									0,
-									0,
-								),
-							);
 						}
 
 						// Show final output as markdown
@@ -1020,17 +999,18 @@ export default function (pi: ExtensionAPI) {
 				// Collapsed view (or still running)
 				let text = `${icon} ${theme.fg("toolTitle", theme.bold("parallel "))}${theme.fg("accent", status)}`;
 				for (const r of details.results) {
+					const isTaskRunning = r.exitCode === -1;
 					const rIcon =
-						r.exitCode === -1
-							? theme.fg("warning", "⏳")
+						isTaskRunning
+							? theme.fg("warning", "⚡")
 							: isFailedResult(r)
 								? theme.fg("error", "✗")
 								: theme.fg("success", "✓");
 					const displayItems = getDisplayItems(r.messages);
 					text += `\n\n${theme.fg("muted", "─── ")}${theme.fg("accent", r.agent)} ${rIcon}`;
-					if (displayItems.length === 0 && !r.activeToolCall)
-						text += `\n${theme.fg("muted", r.exitCode === -1 ? "(running...)" : "(no output)")}`;
-					else text += `\n${renderDisplayItems(displayItems, 5, r.activeToolCall)}`;
+					if (displayItems.length === 0)
+						text += `\n${theme.fg("muted", isTaskRunning ? "(running...)" : "(no output)")}`;
+					else text += `\n${renderDisplayItems(displayItems, 5, isTaskRunning)}`;
 				}
 				if (!isRunning) {
 					const usageStr = formatUsageStats(aggregateUsage(details.results));
