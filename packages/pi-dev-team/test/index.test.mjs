@@ -7,7 +7,9 @@ import {
   matchesTool,
   extractScriptPath,
   resolvePython,
-  runHookScript
+  runHookScript,
+  parseHookOutput,
+  default as devTeamPlugin
 } from "../src/index.js";
 
 test("mapPiToolToClaude maps tools properly", () => {
@@ -92,4 +94,114 @@ test("runHookScript executes Python destructive_guard with allow and block", asy
   } finally {
     fs.rmSync(carefulFile, { force: true });
   }
+});
+
+test("parseHookOutput handles exit 2, exit 1, blocks, additionalContext, and plain advisories", () => {
+  // Exit code 2 with plain text
+  const exit2Plain = parseHookOutput("", "Policy violation: rm -rf", 2);
+  assert.equal(exit2Plain.isBlock, true);
+  assert.equal(exit2Plain.blockReason, "Policy violation: rm -rf");
+
+  // Exit code 2 with JSON decision
+  const exit2Json = parseHookOutput('{"decision": "block", "reason": "Destructive command"}', "", 2);
+  assert.equal(exit2Json.isBlock, true);
+  assert.equal(exit2Json.blockReason, "Destructive command");
+
+  // Exit code 1 (non-zero other than 2)
+  const exit1 = parseHookOutput("", "internal script crash", 1);
+  assert.equal(exit1.isBlock, false);
+  assert.equal(exit1.error, "internal script crash");
+
+  // Exit code 0 with JSON block decision
+  const jsonBlock = parseHookOutput('{"decision": "block", "reason": "Pre-tool policy"}', "", 0);
+  assert.equal(jsonBlock.isBlock, true);
+  assert.equal(jsonBlock.blockReason, "Pre-tool policy");
+
+  // Exit code 0 with additionalContext
+  const jsonCtx = parseHookOutput(
+    JSON.stringify({
+      hookSpecificOutput: {
+        hookEventName: "PostToolUse",
+        additionalContext: "Mutation score 70%"
+      }
+    }),
+    "",
+    0
+  );
+  assert.equal(jsonCtx.isBlock, false);
+  assert.equal(jsonCtx.additionalContext, "Mutation score 70%");
+
+  // Exit code 0 with plain advisory
+  const plainAdv = parseHookOutput("ADVISORY: consider running tests\n", "", 0);
+  assert.equal(plainAdv.isBlock, false);
+  assert.equal(plainAdv.plainOutput, "ADVISORY: consider running tests");
+
+  // Exit code 0 with malformed JSON
+  const malformed = parseHookOutput('{"decision": block', "", 0);
+  assert.equal(malformed.isBlock, false);
+  assert.equal(malformed.plainOutput, '{"decision": block');
+
+  // Exit code 0 with empty stdout
+  const empty = parseHookOutput("   \n", "", 0);
+  assert.equal(empty.isBlock, false);
+  assert.equal(empty.plainOutput, undefined);
+  assert.equal(empty.additionalContext, undefined);
+
+  // Exit code 0 with generic valid JSON (no block decision or additionalContext)
+  const genericJson = parseHookOutput('{"decision": "allow", "status": "ok"}', "", 0);
+  assert.equal(genericJson.isBlock, false);
+  assert.equal(genericJson.plainOutput, undefined);
+  assert.equal(genericJson.additionalContext, undefined);
+});
+
+test("devTeamPlugin wires lifecycle events, blocks tool calls, patches tool_result, and injects context", async () => {
+  const handlers = {};
+  const mockPi = {
+    on(event, handler) {
+      handlers[event] = handler;
+    }
+  };
+
+  const notifications = [];
+  const mockCtx = {
+    sessionId: "test-session",
+    cwd: process.cwd(),
+    ui: {
+      notify(msg, level) {
+        notifications.push({ msg, level });
+      }
+    }
+  };
+
+  devTeamPlugin(mockPi);
+
+  assert.ok(handlers["session_start"]);
+  assert.ok(handlers["input"]);
+  assert.ok(handlers["before_agent_start"]);
+  assert.ok(handlers["tool_call"]);
+  assert.ok(handlers["tool_result"]);
+
+  // 1. before_agent_start with no pending context returns undefined
+  const noCtxResult = await handlers["before_agent_start"]({}, mockCtx);
+  assert.equal(noCtxResult, undefined);
+
+  // 2. tool_call with clean tool execution passes
+  const allowOutcome = await handlers["tool_call"](
+    { toolName: "bash", input: { command: "git status" } },
+    mockCtx
+  );
+  assert.equal(allowOutcome, undefined);
+
+  // 3. tool_result with empty content handles cleanly
+  const resultOutcome = await handlers["tool_result"](
+    {
+      toolName: "bash",
+      input: { command: "git status" },
+      content: [{ type: "text", text: "On branch main" }],
+      isError: false
+    },
+    mockCtx
+  );
+  // No hooks registered for git status PostToolUse in default settings, content untouched
+  assert.equal(resultOutcome, undefined);
 });

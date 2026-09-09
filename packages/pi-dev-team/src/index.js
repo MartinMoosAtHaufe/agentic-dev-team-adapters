@@ -6,6 +6,77 @@ import { fileURLToPath } from "node:url";
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 
+export function parseHookOutput(stdout, stderr, exitCode) {
+  const trimmedOut = stdout ? stdout.trim() : "";
+  const trimmedErr = stderr ? stderr.trim() : "";
+
+  // Exit code 2 is always a block in Claude Code hook convention
+  if (exitCode === 2) {
+    let blockReason = trimmedErr || trimmedOut || "Tool execution blocked by hook policy";
+    if (trimmedOut.startsWith("{")) {
+      try {
+        const parsed = JSON.parse(trimmedOut);
+        if (parsed.reason) {
+          blockReason = parsed.reason;
+        } else if (parsed.error) {
+          blockReason = parsed.error;
+        }
+      } catch {
+        // Fall back to plain trimmed text
+      }
+    }
+    return {
+      isBlock: true,
+      blockReason,
+    };
+  }
+
+  // Non-zero exit code other than 2 is an execution error / warning
+  if (exitCode !== 0) {
+    return {
+      isBlock: false,
+      error: trimmedErr || trimmedOut || `Hook failed with exit code ${exitCode}`,
+    };
+  }
+
+  // Exit code 0: examine stdout
+  if (!trimmedOut) {
+    return { isBlock: false };
+  }
+
+  // Try parsing JSON envelope
+  if (trimmedOut.startsWith("{") && trimmedOut.endsWith("}")) {
+    try {
+      const parsed = JSON.parse(trimmedOut);
+
+      if (parsed.decision === "block") {
+        return {
+          isBlock: true,
+          blockReason: parsed.reason || parsed.error || "Tool execution blocked by hook decision",
+        };
+      }
+
+      if (parsed.hookSpecificOutput && typeof parsed.hookSpecificOutput.additionalContext === "string") {
+        return {
+          isBlock: false,
+          additionalContext: parsed.hookSpecificOutput.additionalContext,
+        };
+      }
+
+      // Valid JSON without block decision or additionalContext (e.g. {"decision": "allow"} or {})
+      // is considered handled without emitting raw JSON as an advisory notification.
+      return { isBlock: false };
+    } catch {
+      // Malformed JSON falls back cleanly to plain text advisory
+    }
+  }
+
+  return {
+    isBlock: false,
+    plainOutput: trimmedOut,
+  };
+}
+
 let cachedPythonBin = null;
 
 export function resolvePython() {
@@ -176,8 +247,17 @@ export default function devTeamPlugin(pi) {
     }
   }
 
+  // Buffer for context injection across SessionStart / UserPromptSubmit into before_agent_start
+  const pendingTurnContext = [];
+
   async function executeHookGroup(eventName, toolName, basePayload, ctx) {
     const entries = settingsHooks[eventName] || [];
+    const result = {
+      blocked: false,
+      additionalContexts: [],
+      plainOutputs: [],
+      errors: [],
+    };
 
     for (const entry of entries) {
       if (toolName && !matchesTool(entry.matcher, toolName)) {
@@ -195,21 +275,35 @@ export default function devTeamPlugin(pi) {
         };
 
         const res = await runHookScript(scriptRel, pluginRoot, payload);
+        const parsed = parseHookOutput(res.stdout, res.stderr, res.exitCode);
 
-        if (res.exitCode === 2) {
-          return {
-            blocked: true,
-            reason: res.stderr.trim() || res.stdout.trim() || `Blocked by hook: ${scriptRel}`,
-          };
+        if (parsed.isBlock) {
+          result.blocked = true;
+          result.reason = parsed.blockReason || `Blocked by hook: ${scriptRel}`;
+          return result;
         }
 
-        if (res.stdout && res.stdout.trim().length > 0 && ctx?.ui?.notify) {
-          ctx.ui.notify(res.stdout.trim(), "info");
+        if (parsed.error) {
+          result.errors.push(parsed.error);
+          if (ctx?.ui?.notify) {
+            ctx.ui.notify(parsed.error, "error");
+          }
+        }
+
+        if (parsed.additionalContext) {
+          result.additionalContexts.push(parsed.additionalContext);
+        }
+
+        if (parsed.plainOutput) {
+          result.plainOutputs.push(parsed.plainOutput);
+          if (ctx?.ui?.notify) {
+            ctx.ui.notify(parsed.plainOutput, "info");
+          }
         }
       }
     }
 
-    return { blocked: false };
+    return result;
   }
 
   pi.on("session_start", async (_event, ctx) => {
@@ -217,7 +311,10 @@ export default function devTeamPlugin(pi) {
       session_id: ctx.sessionId || "pi-session",
       cwd: ctx.cwd,
     };
-    await executeHookGroup("SessionStart", undefined, payload, ctx);
+    const res = await executeHookGroup("SessionStart", undefined, payload, ctx);
+    if (res.additionalContexts.length > 0) {
+      pendingTurnContext.push(...res.additionalContexts);
+    }
   });
 
   pi.on("input", async (event, ctx) => {
@@ -226,7 +323,26 @@ export default function devTeamPlugin(pi) {
       cwd: ctx.cwd,
       prompt: event.text,
     };
-    await executeHookGroup("UserPromptSubmit", undefined, payload, ctx);
+    const res = await executeHookGroup("UserPromptSubmit", undefined, payload, ctx);
+    if (res.additionalContexts.length > 0) {
+      pendingTurnContext.push(...res.additionalContexts);
+    }
+  });
+
+  pi.on("before_agent_start", async (_event, _ctx) => {
+    if (pendingTurnContext.length === 0) {
+      return;
+    }
+    const combined = pendingTurnContext.join("\n\n");
+    pendingTurnContext.length = 0;
+
+    return {
+      message: {
+        customType: "dev-team-hook",
+        content: combined,
+        display: true,
+      },
+    };
   });
 
   pi.on("tool_call", async (event, ctx) => {
@@ -263,7 +379,28 @@ export default function devTeamPlugin(pi) {
       },
     };
 
-    await executeHookGroup("PostToolUse", claudeToolName, payload, ctx);
+    const outcome = await executeHookGroup("PostToolUse", claudeToolName, payload, ctx);
+    if (outcome.additionalContexts.length > 0) {
+      const extraBlocks = outcome.additionalContexts.map((ctxText) => ({
+        type: "text",
+        text: ctxText,
+      }));
+
+      let existingContent = [];
+      if (Array.isArray(event.content)) {
+        existingContent = event.content;
+      } else if (typeof event.content === "string" && event.content.length > 0) {
+        existingContent = [{ type: "text", text: event.content }];
+      } else if (event.content && typeof event.content === "object") {
+        existingContent = [event.content];
+      }
+
+      return {
+        content: [...existingContent, ...extraBlocks],
+        isError: event.isError,
+        details: event.details,
+      };
+    }
   });
 
   pi.on("session_shutdown", async (_event, ctx) => {
