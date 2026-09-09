@@ -15,7 +15,7 @@ This package ports the `dev-team` plugin to [Pi Coding Agent](https://pi.dev).
 
 3. **Agents & Skills**:
    - Shipped skills under `plugins/dev-team/skills/` are exposed natively to Pi via `pi.skills` in `package.json`.
-   - Subagents run via Pi's built-in subagent runner using the 48 persona definitions in `plugins/dev-team/agents/`.
+   - Subagents run via the bundled subagent extension using the persona definitions in `plugins/dev-team/agents/`.
 
 ## Running Tests
 

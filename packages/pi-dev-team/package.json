@@ -1,7 +1,8 @@
 {
-  "name": "@earendil-works/pi-dev-team",
+  "name": "pi-dev-team",
   "version": "13.1.0",
   "description": "Pi Coding Agent port of the dev-team persona-driven AI development plugin",
+  "author": "Martin Moos",
   "type": "module",
   "main": "src/index.js",
   "keywords": [
@@ -10,7 +11,8 @@
   ],
   "pi": {
     "extensions": [
-      "./src/index.js"
+      "./src/index.js",
+      "./src/subagent/index.ts"
     ],
     "skills": [
       "../../plugins/dev-team/skills/*"
@@ -18,5 +20,8 @@
   },
   "scripts": {
     "test": "node --test test/index.test.mjs"
+  },
+  "peerDependencies": {
+    "@earendil-works/pi-coding-agent": "*"
   }
 }

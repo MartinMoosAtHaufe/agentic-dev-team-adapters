@@ -56,7 +56,12 @@ test("extractScriptPath parses script from command string", () => {
 });
 
 test("runHookScript executes Python destructive_guard with allow and block", async () => {
-  const repoRoot = path.resolve(process.cwd());
+  // When running via `npm test --prefix packages/pi-dev-team`, process.cwd() is packages/pi-dev-team.
+  // Resolve repo root by looking for .claude or plugins/dev-team.
+  let repoRoot = path.resolve(process.cwd());
+  while (repoRoot !== path.dirname(repoRoot) && !fs.existsSync(path.join(repoRoot, "plugins/dev-team"))) {
+    repoRoot = path.dirname(repoRoot);
+  }
   const pluginRoot = path.join(repoRoot, "plugins/dev-team");
 
   // Safe command -> exit 0
