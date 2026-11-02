@@ -1,0 +1,14 @@
+{
+  "name": "dev-team-copilot",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "test:sdk": "node test_sdk.mjs"
+  },
+  "devDependencies": {
+    "@github/copilot-sdk": "1.0.28"
+  },
+  "overrides": {
+    "zod": "^4.6.6"
+  }
+}
