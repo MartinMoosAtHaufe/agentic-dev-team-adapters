@@ -571,12 +571,10 @@ def run_hook(event: str, payload: dict, plugin: Path = HOME) -> tuple[dict, int]
         command = normalized["tool_input"].get("command", "")
         if not isinstance(command, str):
             raise ValueError("Shell command must be a string")
-        routing_command = command
-        if payload.get("tool_name", payload.get("toolName")) == "powershell":
-            # shlex does not understand PowerShell here-string delimiters.
-            routing_command = re.sub(
-                r"""(?ms)@(['"])[ \t]*\r?\n.*?^\1@""", "''", routing_command,
-            )
+        # shlex does not understand PowerShell here-string delimiters.
+        routing_command = re.sub(
+            r"""(?ms)@(['"])[ \t]*\r?\n.*?^\1@""", "''", command,
+        )
         tokens = [token.strip("'\"") for token in shlex.split(routing_command, posix=False)]
         basenames = [re.split(r"[/\\]", token)[-1] for token in tokens]
         invokes_python = any(

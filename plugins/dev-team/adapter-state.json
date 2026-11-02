@@ -1,6 +1,6 @@
 {
-  "fingerprint": "fcd80a8fb5a7183daa0e9d388ac1cc0f93cedb72feb326ae3038729b4f8c5759",
-  "version": "14.0.1-copilot.2",
+  "fingerprint": "12194d50a20f4973a731df898f22451072c0b6f31c6a43b6c7b57d43dcffa7fa",
+  "version": "14.0.1-copilot.3",
   "agent_models": {
     "a11y-review": "haiku",
     "adr-author": "sonnet",
