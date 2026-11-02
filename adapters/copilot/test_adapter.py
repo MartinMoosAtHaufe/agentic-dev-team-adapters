@@ -20,7 +20,7 @@ class AdapterTests(unittest.TestCase):
     def setUp(self) -> None:
         self.temporary = tempfile.TemporaryDirectory(prefix="copilot adapter ")
         self.addCleanup(self.temporary.cleanup)
-        self.root = Path(self.temporary.name)
+        self.root = Path(self.temporary.name).resolve()
         self.source = self.root / "upstream"
         for folder in [".claude-plugin", "hooks", "agents", "skills/example"]:
             (self.source / folder).mkdir(parents=True, exist_ok=True)
