@@ -1,0 +1,39 @@
+Copilot-native workflow adaptation
+
+The upstream agent/skill instructions remain the behavioral contracts. These
+overrides replace their Claude-specific execution mechanism, not their scope,
+human approval gates, verification requirements, or output contracts.
+
+Orchestration and review
+Follow agents/orchestrator.md and its referenced three-phase workflow policy.
+Classify the request in the current session; dispatch the required personas
+through native task calls using installed namespaced agent IDs. Keep phases,
+dependency ordering, review barriers, human approvals and persisted artifacts.
+Do not invoke scripts/orchestrator.py to start nested Claude sessions or use
+--skip-llm stubs as evidence that personas ran. Run deterministic helper scripts,
+tests, parsers and validators normally. Review/source/guardian agents perform
+their judgment steps natively instead of invoking their Claude-backed scripts.
+
+Headless runs and evaluation
+For in-session one-shot work, load the requested skill and dispatch a fresh native
+task with the prompt, scope, declared output contract and explicit mapped model.
+Collect its actual result and report failures. A native subagent has a separate
+conversation, not a fresh HOME, account, permission store or isolated runtime.
+Do not claim equivalent headless isolation, Claude session IDs, token accounting,
+costs, or benchmark validity. If the caller requires those properties or a
+script-consumable isolated subprocess, stop and explain that this mode remains
+unsupported instead of returning a success-shaped substitute.
+
+Mutation generation
+Use the upstream mutation-kill agent's agent-driven generation mode, not its
+Claude --headless mode or the shard pipeline that forces it. Dispatch generation
+work natively; keep the upstream report parsing, insertion/safety checks,
+build/test verification, approval and commit rules. Do not invent a generation
+callback that a standalone Python process can call into a live chat. If an
+unattended caller requires that callback or a headless subprocess, report it as
+unsupported. Deterministic mutation measurement and report helpers stay usable.
+
+Unsupported native equivalence
+Claude transcript analysis, exact token/cost metrics, fresh-HOME isolation and
+post-compaction reinjection are not implemented. Use native host usage and
+session controls; never present Claude-only metrics as Copilot measurements.

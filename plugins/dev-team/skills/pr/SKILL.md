@@ -1,0 +1,278 @@
+---
+name: pr
+description: >-
+  Run a pre-PR quality gate (tests, typecheck, lint, code review) and then
+  create a pull request with a structured summary. Use when the user says
+  "create a PR", "open a PR", "submit for review", or "I'm done with this
+  feature".
+argument-hint: "[--skip-review] [--draft] [--base <branch>]"
+user-invocable: true
+allowed-tools: Read, Write, Edit, Glob, Grep, Bash(git *), Bash(gh *), Bash(npm *), Bash(npx *), Bash(pnpm *), Bash(yarn *), Bash(make *), Bash(pytest *), Bash(go *), Bash(cargo *), Bash(dotnet *), Skill(code-review *)
+---
+
+# Pull Request
+
+Role: orchestrator. This command enforces quality gates before creating a PR.
+
+You have been invoked with the `/pr` command.
+
+## Orchestrator constraints
+
+1. Run the quality gate and open the PR; do not bypass failing gates.
+2. Delegate review to the review agents; do not review code yourself.
+3. **Be concise.** Report gate results and the PR URL, no preamble.
+
+## Parse Arguments
+
+Arguments: $ARGUMENTS
+
+- `--skip-review`: Skip the `/code-review` step (not recommended)
+- `--draft`: Create a draft PR
+- `--base <branch>`: Target branch (default: `main`)
+- `--no-auto-merge`: Do not enable auto-merge (the default is to enable it; see Step 5)
+
+## Steps
+
+### 1. Pre-flight checks
+
+Verify:
+
+- Current branch is not `main` or `master`
+- There are commits ahead of the base branch
+- Working tree is clean (no uncommitted changes) — if dirty, ask whether to commit or stash
+
+If a plan file is present (check `plans/` for the most recently modified approved or implemented plan), run the plan completion gate:
+
+```bash
+python3 "${CLAUDE_PLUGIN_ROOT}/scripts/progress_guardian.py" --pre-pr --plan <plan-file>
+```
+
+A non-zero exit means incomplete steps remain; stop and surface the findings — do not open the PR until all steps are `[x]`.
+
+### 2. Run quality gate
+
+Run each check sequentially. Stop on first failure:
+
+1. **Tests**: Detect and run the project's test suite
+   - `package.json` scripts: `npm test` or `pnpm test` or `yarn test`
+   - `pytest.ini` / `pyproject.toml`: `pytest`
+   - `go.mod`: `go test ./...`
+   - `Cargo.toml`: `cargo test`
+   - `*.csproj`: `dotnet test`
+   - `Makefile` with `test` target: `make test`
+
+2. **Type check** (if applicable):
+   - `tsconfig.json`: `npx tsc --noEmit`
+   - `mypy.ini` / pyproject.toml with mypy: `mypy .`
+
+3. **Lint** (if applicable):
+   - `eslint` in deps: `npx eslint .`
+   - `ruff` available: `ruff check .`
+   - `golangci-lint` available: `golangci-lint run`
+
+4. **Code review** (unless `--skip-review`):
+   - Scope the review to this branch's diff against the base branch, not the whole repo. At PR time the working tree is clean (Step 1 requires it), so a bare `/code-review --json` would auto-scope to the **full repository** — expensive, wrongly scoped, and on a large repo it can trigger the sliced-review path. Compute the merge base:
+
+     ```bash
+     BASE=$(git merge-base HEAD "origin/<base>")   # <base> defaults to main, or the --base arg
+     HEAD_SHA=$(git rev-parse HEAD)
+     BRANCH=$(git branch --show-current)
+     ```
+
+   - **Gate-retry scoping (#2087).** `/code-review`'s own round ledger (`finding_signature.py`, see `../code-review/SKILL.md` step 6a) only scopes findings *within* a single `/code-review` invocation — every fresh top-level call restarts at round 1 with the full branch diff. Left unmanaged, a second `/pr` run after a human fixes findings from the first pays full review cost again, even though only the fix delta is unreviewed. `${CLAUDE_PLUGIN_ROOT}/skills/pr/scripts/gate_retry_state.py` is the deterministic transition function that closes that gap by persisting phase/round state across `/pr` invocations. Drive it with this bounded loop — **never more than two `/code-review` calls in one `/pr` invocation**:
+
+     ```bash
+     # Call 1: decide this call's scope (no --last-outcome yet).
+     DECISION=$(python3 "${CLAUDE_PLUGIN_ROOT}/skills/pr/scripts/gate_retry_state.py" \
+       --state .claude/memory/pr-gate-state.json \
+       --branch "$BRANCH" --base-sha "$BASE" --head-sha "$HEAD_SHA")
+     SINCE_REF=$(echo "$DECISION" | jq -r '.since_ref')
+     ESCALATE=$(echo "$DECISION" | jq -r '.escalate')
+
+     if [ "$ESCALATE" = "true" ]; then
+       # Retry budget exhausted for this PR's gate — stop, do not call
+       # /code-review again. Surface this and fall into the same
+       # proceed-anyway-or-fix branching as a `fail` below, noting that
+       # further retries need `--reset` (a fresh look), since automatic
+       # narrow-scoping is exhausted.
+     else
+       RESULT=$(/code-review --since "$SINCE_REF" --json)
+       # gate_retry_state.py only knows pass|warn|fail; a doc-only
+       # short-circuit (`status: "skipped"`) converges the round exactly
+       # like a pass — map it before recording.
+       OVERALL=$(echo "$RESULT" | jq -r 'if .status == "skipped" then "pass" else .overall end')
+
+       # Call 2: record the outcome and get the next scope.
+       DECISION=$(python3 "${CLAUDE_PLUGIN_ROOT}/skills/pr/scripts/gate_retry_state.py" \
+         --state .claude/memory/pr-gate-state.json \
+         --branch "$BRANCH" --base-sha "$BASE" --head-sha "$HEAD_SHA" \
+         --last-outcome "$OVERALL")
+       SINCE_REF=$(echo "$DECISION" | jq -r '.since_ref')
+
+       # Only the fix-diff -> confirm transition returns a non-null
+       # since_ref here (one mandatory full-branch pass before the gate can
+       # close, issue #2087 requirement 3) — run it once, immediately, in
+       # this same invocation, then record it. Do not loop: this is the
+       # ONLY place a third /code-review call can happen, and it never
+       # triggers a fourth.
+       if [ "$SINCE_REF" != "null" ]; then
+         RESULT=$(/code-review --since "$SINCE_REF" --json)
+         OVERALL=$(echo "$RESULT" | jq -r 'if .status == "skipped" then "pass" else .overall end')
+         DECISION=$(python3 "${CLAUDE_PLUGIN_ROOT}/skills/pr/scripts/gate_retry_state.py" \
+           --state .claude/memory/pr-gate-state.json \
+           --branch "$BRANCH" --base-sha "$BASE" --head-sha "$HEAD_SHA" \
+           --last-outcome "$OVERALL")
+       fi
+     fi
+     ```
+
+     `/code-review --since <ref> --json` itself is unchanged: `/pr` owns the human gate, so code-review still runs non-interactively (skips its own "fix or report?" prompt, applies its fix loop automatically up to 5 iterations) and returns an aggregated status — only the `--since` ref is now computed by the gate-retry decision above instead of always being `$BASE`.
+
+   - Read `DECISION`'s final `phase` and the last `OVERALL` computed:
+
+     | `phase` / outcome | Meaning | Action |
+     | --- | --- | --- |
+     | `phase: "done"` | Gate closed — either a full-branch pass on round 1, or the mandatory confirm pass after a narrowed fix-diff pass | Continue to step 3 |
+     | `escalate: true` | Retry budget (`PR_GATE_MAX_ROUNDS`) exhausted across `/pr` invocations for this PR | Stop; do not call `/code-review` again this invocation. Surface that the retry budget is exhausted and further retries need `--reset` for a fresh full-branch look |
+     | last `OVERALL` is `fail`, not escalated | Actionable findings remain after code-review's own internal fix loop | Show the remaining findings and ask the user whether to proceed anyway or stop and fix — and tell them re-running `/pr` will scope the next check to only what changed since this attempt (the fix delta), not the whole branch, unless the base moved |
+     | last `OVERALL` is `pass` / `warn`, or `status` is `skipped` (doc-only short-circuit, checked before any of the above) | Nothing further to review | Continue to step 3 |
+
+Report results as a checklist:
+
+```
+## Quality Gate
+- [x] Tests pass (42 passed, 0 failed)
+- [x] Type check clean
+- [x] Lint clean
+- [ ] Code review: 2 warnings (see below)
+```
+
+### 3. Generate PR summary
+
+Analyze the diff against the base branch (`git diff <base>...HEAD`) and commit history to generate:
+
+- **Title**: Short, imperative (<70 chars)
+- **Summary**: 1-3 bullet points of what changed and why
+- **Test plan**: How to verify the changes
+- **Decisions & assumptions**: Collect everything decided without a human in the
+  loop, from the run's artifacts: the plan's `## Approval` auto-approval record and
+  any auto-passed gate lines from the build output; the plan's stated stances on
+  `knowledge/decision-defaults.md` axes; the spec's `## Ambiguity Log` entries
+  classified `inferable`; `assumptions` entries from software-engineer step outputs;
+  auto-applied review fixes with `confidence: medium`; and deferred follow-ups.
+  Omit the section only when every gate had an interactive human approval.
+- **Evidence bundle**: Assemble per `${CLAUDE_PLUGIN_ROOT}/knowledge/evidence-bundle.md`
+  from the Step 2 quality-gate results plus on-disk pipeline data — **no new
+  checks, no re-execution**:
+  - **Checks run**: the exact Step 2 commands (test/typecheck/lint/`/code-review
+    --since <base> --json`) and their results.
+  - **Scope notes**: gates skipped as not-applicable in Step 2 (e.g. no
+    `tsconfig.json` → type check skipped), plus `--skip-review` if passed.
+  - **Untested regions**: read `baseline-coverage.json` / `coverage-history.json`
+    if present; otherwise "not measured — no coverage tool detected."
+  - **Residual risks**: derived-first from `.claude/metrics/review-value.jsonl` entries
+    with `outcome: "escalated"`, gate-bypass audit lines, and negative coverage
+    deltas; "None identified" only when all derived sources are empty.
+  - This command assembles from its own runtime's live data — it never reads a
+    handoff file from a prior `/build` run, so running `/pr` standalone still
+    produces a complete (possibly more-degraded) bundle.
+
+### 4. Create the PR
+
+**Never phrase a non-closing issue reference with a closing keyword, even
+negated.** GitHub's closing-keyword parser is a dumb regex over the PR body:
+`(close|closes|closed|fix|fixes|fixed|resolve|resolves|resolved)\s+#\d+`. It
+fires on that pattern regardless of grammar — "does not close #123", "won't
+fix #123", and "this doesn't resolve #123" all still auto-close #123 on
+merge (issue #977). If an issue is only partially addressed or deferred,
+write around the keyword instead: "leaves #123 open", "the remaining scope
+is deferred to #124", "see #123 for the rest of this work" — never
+`<closing-keyword> #123` in any form, negated or not.
+
+Before calling `gh pr create`, lint the drafted body for accidental matches:
+
+```bash
+python3 "${CLAUDE_PLUGIN_ROOT}/scripts/pr_close_keyword_lint.py" --body-file <body-file>
+```
+
+This is advisory only (always exits 0). If it prints warnings, rephrase the
+flagged sentence per the guidance above before creating the PR — do not
+proceed with a body the linter flagged without fixing the phrasing.
+
+```bash
+gh pr create --title "<title>" --body "<body>" [--draft] --base <base>
+```
+
+**Check for a repo-provided template first**: `.github/PULL_REQUEST_TEMPLATE.md`
+(the canonical GitHub location). If it exists, use it as the body's base
+structure instead of this skill's own hardcoded template below:
+
+- Fill each of the template's existing sections with the corresponding
+  generated content where an obvious semantic match exists — a
+  "Summary"/"What"/"Description"-shaped heading gets the summary bullets; a
+  "Test(ing) Plan"/"How to test"/"Verification"-shaped heading gets the test
+  plan steps; a "Checklist" heading that already lists gate-shaped items gets
+  the Quality Gate results.
+- Preserve every section the template defines, in its own order, even when
+  nothing here auto-fills it — leave the template's own placeholder/comment
+  text for the operator rather than deleting the section.
+- Append this skill's own **Decisions & Assumptions** and **Evidence
+  Bundle** sections at the end, under their own headings, whenever the
+  template has no equivalent section for them. Never drop that content
+  silently just because the repo's template didn't ask for it.
+- Preserve the template's own HTML comments (`<!-- ... -->`) — they are
+  operator-facing instructions (e.g. "PR title must be conventional"), not
+  placeholders to strip.
+
+If no such file exists, fall back to this skill's own structured template
+exactly as before:
+
+```markdown
+## Summary
+- <bullet 1>
+- <bullet 2>
+
+## Quality Gate
+- [x] Tests: <N> passed
+- [x] Type check: clean
+- [x] Lint: clean
+- [x] Code review: <status>
+
+## Decisions & Assumptions
+<!-- Everything decided without a human in the loop. An empty section means a fully human-gated run. -->
+- <axis or assumption> — <stance taken> — <one-line rationale / recommended-default basis>
+
+## Test Plan
+- [ ] <verification step 1>
+- [ ] <verification step 2>
+
+## Evidence Bundle
+<!-- Per ${CLAUDE_PLUGIN_ROOT}/knowledge/evidence-bundle.md. All four headers always appear; a section with no data states why instead of being omitted. -->
+**Checks run**
+- `<command>` — <result>
+
+**Scope notes**
+- <what this gate does not cover for this diff>
+
+**Untested regions**
+- <coverage % + delta, or "not measured — <reason>">
+
+**Residual risks**
+- <deferred/escalated finding, waiver, or bypass line — or "None identified">
+```
+
+### 5. Enable auto-merge (default)
+
+Unless `--no-auto-merge` or `--draft` was given, enable auto-merge so the PR lands automatically once checks pass and any required reviews are in — rather than merging directly to trunk. This is the default integration stance in `knowledge/decision-defaults.md` (auto-merge vs. direct-to-trunk).
+
+```bash
+gh pr merge --auto --squash
+```
+
+If the repository does not have auto-merge enabled (the command errors), report that and leave the PR open for manual merge — do **not** merge directly to trunk to work around it.
+
+### 6. Report
+
+Display the PR URL and a summary of the quality gate results.
+
+If any gate failed and the user chose to proceed anyway, note this in the PR body as a caveat.

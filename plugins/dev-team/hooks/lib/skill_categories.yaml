@@ -1,0 +1,125 @@
+# Capability taxonomy for docs/skills.md.
+#
+# build_skills_index.py groups the skills catalog by these capabilities, in this
+# order. Each skill's row (name, description) is still derived from its own
+# SKILL.md frontmatter — this file only decides *which capability section* it
+# lands in. A skill on disk that is not listed here falls into a trailing
+# "Other" section; the freshness gate then shows it as a diff, prompting you to
+# file it under the right capability and regenerate.
+#
+# Regenerate after editing: python3 plugins/dev-team/hooks/lib/build_skills_index.py
+
+categories:
+  - name: Specs and planning
+    skills:
+      [
+        specs,
+        plan,
+        design-doc,
+        design-interrogation,
+        design-it-twice,
+        api-design,
+        gherkin-derive,
+        gherkin-public,
+        feature-file-validation,
+        issues-from-plan,
+        issues-from-assessment,
+      ]
+
+  - name: Build and ship
+    skills:
+      [build, test-driven-development, continue, pr, ship, branch-workflow, autoship]
+
+  - name: Code review and static analysis
+    skills:
+      [
+        code-review,
+        review,
+        review-agent,
+        review-summary,
+        apply-fixes,
+        semgrep-analyze,
+        semantic-scan,
+        semantic-duplication-scan,
+        static-analysis-integration,
+        frontend-architecture,
+      ]
+
+  - name: Testing and coverage
+    skills:
+      [
+        test-design,
+        test-design-advisor,
+        test-health,
+        test-modernize,
+        test-upgrade,
+        test-audit-disable,
+        mutation-testing,
+        farley-score,
+        cd-test-architecture,
+        apply-test-doubles,
+        exploratory-testing,
+        explore,
+        coverage-baseline,
+        coverage-delta,
+        quality-targets-converge,
+        legacy-code,
+      ]
+
+  - name: Security
+    skills: [threat-modeling, docker-image-audit, governance-compliance]
+
+  - name: Architecture and domain modeling
+    skills:
+      [
+        domain-driven-design,
+        domain-analysis,
+        hexagonal-architecture,
+        adr-tools,
+        ubiquitous-language,
+        mermaid-diagramming,
+      ]
+
+  - name: Performance, containers, and browser
+    skills:
+      [
+        docker-image-create,
+        benchmark,
+        performance-benchmark,
+        browse,
+        browser-testing,
+      ]
+
+  - name: Debugging and diagnostics
+    skills: [systematic-debugging, ci-debugging, triage, fix]
+
+  - name: Setup, config, and plugin management
+    skills: [setup, project-init, upgrade, version, help]
+
+  - name: Session, context, and telemetry
+    skills:
+      [
+        context-loading-protocol,
+        handoff,
+        session-review,
+        telemetry,
+        cost-report,
+        artifact-lifecycle,
+        performance-metrics,
+      ]
+
+  - name: Safety modes
+    skills: [careful, freeze, unfreeze, guard]
+
+  - name: Harness governance and tuning
+    skills:
+      [
+        agent-audit,
+        agent-eval,
+        harness-audit,
+        agent-readiness,
+        competitive-analysis,
+        feedback-learning,
+        human-oversight-protocol,
+        quality-gate-pipeline,
+      ]

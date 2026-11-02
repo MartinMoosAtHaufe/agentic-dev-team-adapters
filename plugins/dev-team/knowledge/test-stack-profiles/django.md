@@ -1,0 +1,13 @@
+# Stack profile — Django / Python
+
+Resolves `test-design-advisor`'s abstract layer (`test-pyramid.md`) to the canonical Django/Python tool.
+
+| Layer | Tool | How to assert |
+|-------|------|---------------|
+| Unit | pytest (or `unittest`); `unittest.mock` only for a blocker collaborator (`internal-collaborator-doubling.md`) | call functions/methods directly; no DB |
+| Component / Service | `pytest-django` + DRF `APIClient` / Django `Client` | drive the view/endpoint in-process; double outbound deps |
+| Integration | `pytest-django` with the real test DB (transactional fixtures) | models, migrations, ORM queries, serializers against a real DB |
+| Contract | Pact (Python) or `schemathesis` against the OpenAPI spec | provider/consumer agreement (`microservice-testing.md`) |
+| E2E | Playwright (Python) / Selenium | critical journeys only |
+
+**Notes.** `freezegun` (or inject a clock) for time; **VCR.py** (`vcrpy`) for outbound HTTP — the preferred record-and-replay tool — double the **owned adapter**, not the third-party SDK; `responses`/`httpx` mock remains a documented fallback alternative for teams already depending on it. See `../virtual-service-libraries.md` for the full preferred/backup catalog. Use `pytest.mark.django_db` deliberately; a test that doesn't need the DB shouldn't take it (speed). For Flask/FastAPI substitute the app's test client (`app.test_client()` / `TestClient`) at the component layer — the layer mapping is identical.

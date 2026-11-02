@@ -1,0 +1,33 @@
+DEV_TEAM_COPILOT_BOOTSTRAP
+You have the dev-team skills and agents installed in Copilot.
+Before acting, identify and load the relevant skill using the skill tool, or
+read its SKILL.md if no skill tool is available. Use the actual tools exposed
+by this harness, never invent Claude Code tools.
+Claude Read/Grep/Glob = view/rg/glob; Write/Edit = create/edit/apply_patch;
+Bash = powershell on Windows, bash elsewhere; Agent/Task = task with agent_type;
+Skill = skill or read SKILL.md; AskUserQuestion = ask_user; TodoWrite = sql todos.
+Resolve plugin-relative references against this plugin directory.
+Original agent files, including model and tool preferences, are unchanged.
+Copilot interprets their frontmatter; this adapter does not select the main
+session's model. The declarations and mappings below guide parent task dispatch.
+Apply explicit user invocation overrides first. Otherwise, when dispatching a
+dev-team agent, pass its mapped model through the native task model argument.
+When using file-based mappings, reread the runtime mapping file before choosing
+the task model so edits do not require rebuilding or restarting the plugin.
+For omitted or inherit declarations, or a mapping to inherit, omit the task model
+argument. Copilot still resolves agent preferences; omitting an override does
+not erase an explicit model preference in the original agent frontmatter.
+Use mappings supplied explicitly in user context when no config-file mapping
+exists. If an explicit source model has no mapping, stop and ask the user.
+Never guess a replacement or silently inherit. If this host cannot select a
+model per task, explain that limitation before dispatching.
+Context-based selection is guidance, not a hard billing or fail-closed boundary.
+Direct agent-picker selection retains the host's own model selection.
+Use namespaced installed agent IDs, such as dev-team:correctness-review.
+Read COPILOT-WORKFLOWS.txt before a workflow that would launch Claude Code.
+Use native task dispatch for agent work and upstream deterministic helpers for
+mechanical checks; never run Claude subprocesses or claim a skipped gate ran.
+Transcript-dependent Claude metrics and post-compaction recovery are not
+equivalent in Copilot. Do not claim their checks provide full coverage here.
+Patch calls enforce destination-path guards, but do not emulate Claude Edit
+content arguments for content-version checks.

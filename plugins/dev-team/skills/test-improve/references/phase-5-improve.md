@@ -1,0 +1,215 @@
+Iterate the approved Phase-5 Story set. For **each Story**:
+
+**Never dispatch multiple Stories' build loops in parallel against one shared
+working tree (issue #1571).** Each Story's step 1 runs `/build`, which
+`git add`/`git commit`s as it goes — two or more concurrent dispatches
+against the same checkout race on the index and working files, and that race
+is real: it has produced observed data loss (reverted test files, deleted
+`.feature` files) even when the assigned files looked disjoint, because git
+index/commit operations aren't file-scoped the way file edits are. Process
+Stories one at a time in this session, or — if you fan out multiple Stories
+concurrently via the `Agent` tool — dispatch every one of them with
+`isolation: "worktree"` so each gets its own git working tree; disjoint file
+assignment alone is not a substitute for worktree isolation here.
+
+1. **Build** — invoke `/build <story-id>`. `/build` inherits the **no-refactor**
+   mode from Phase 0: production-code changes are **rejected**. A Story that
+   would require a production-code change is surfaced as a REFACTOR_REQUIRED
+   deferral candidate and re-classified for Phase 6.
+2. **Apply the Phase-0 binding mode.** If Phase 0 selected
+   `xunit-with-annotations`, the resulting test names mirror the source
+   scenario name and Given/When/Then lines appear as **leading comments**
+   citing the source `.feature` file. In `bdd-runner` mode, the step
+   definitions are filled in against the parser wired at Phase 3. In `none`
+   mode, the test is authored idiomatically for the stack without
+   feature-file citations.
+3. **Coverage delta** — after `/build` closes the Story, invoke
+   `/coverage-delta --workflow test-improve --story <id>`. The delta is
+   appended to `.dev-team-reports/test-improve/<slug>/data/coverage-history.json`.
+4. **Coverage-delta steering check (issue #1790).** After the delta is
+   appended — **every Story, not only at the end of the phase** — run the
+   trailing-streak check. Do not eyeball the history:
+
+   ```
+   sh "${CLAUDE_PLUGIN_ROOT}/hooks/py.sh" "${CLAUDE_PLUGIN_ROOT}/scripts/coverage_delta_steering.py" \
+     --history .dev-team-reports/test-improve/<slug>/data/coverage-history.json \
+     --json
+   ```
+
+   - **Exit 0** — continue to the mutation-kill step, but read *which* exit-0
+     status came back: `ok` means the last Story actually moved line coverage;
+     `insufficient_history` means too few Stories have closed (or the latest
+     Story's movement could not be measured) to judge a streak;
+     `flat_streak_forming` means the latest Story did **not** move coverage but
+     the streak is still short of the threshold — echo that one to the operator
+     as a watch signal rather than silently treating it as `ok`.
+   - **Exit 3** (`flat_streak`) — three or more consecutive Stories (the
+     default; `--consecutive` and `--min-line-delta` tune it) moved line
+     coverage by less than the minimum expected per-Story delta.
+     **Surface it now, mid-phase** — a run once spent its entire Phase-5
+     budget on an already-covered layer because this signal was only read at
+     the end; **never defer it to the Phase-9 report.** Print the script's
+     flat-Story list and running average, name the top `seam: absent` modules
+     from `coverage-gap-ranking.json`, and prompt **`[t] re-check Phase-1
+     targeting / [c] continue`** (shape `[t/c]` — `t` is unused elsewhere in
+     this flow, and `c` keeps the "accept and move on" meaning it already has
+     in mutation-kill's `[c/r/w/q]`):
+     - **`[t]`** — re-read `coverage-gap-ranking.json` and re-order the
+       remaining Story set into its rank order (Phase 4's rule, applied to
+       what is left) before the next Story's `/build`. A remaining Story whose
+       target module reads `seam: absent` under `refactor-mode: no-refactor` is
+       re-classified **REFACTOR_REQUIRED for Phase 6 rather than retried** —
+       retrying it under no-refactor is what produced the flat streak.
+     - **`[c]`** — continue, recording `coverage_flat_streak: <n> stories` in
+       `.claude/memory/test-improve/<slug>/phase-5.md` so Phase 8 and the
+       report read it from a durable record instead of re-deriving it.
+     - **Non-interactive runs** record the streak and continue — the same
+       **record-and-continue posture, never a silent pass**.
+   - **Exit 2** — the history file is missing or unreadable. Resolve it (the
+     Story's `/coverage-delta` did not append) rather than treating the
+     unknown as `ok`.
+5. **Mutation-kill, once per module batch (`kill-loop` and
+   `baseline+kill-loop`; skipped when `off`).** The `mutation-kill` agent is
+   opus-tier at `effort: high`, and every dispatch re-pays its fixed priming
+   plus the mutation tool's build/instrumentation warm-up. Phase 4 writes the
+   Story set in `coverage-gap-ranking.json` rank order (#1786), so Stories
+   targeting the same module are **adjacent** — dispatching per Story paid
+   that fixed cost again for a scope that was warm one Story ago (#1963).
+
+   **Group contiguous Stories by target module, then dispatch per batch.**
+   Take the grouping from the ranking's own `modules` buckets — the artifact
+   Phase 2 already computed — never by re-deriving a module map here. A batch
+   is a maximal run of consecutive Stories in the approved order whose target
+   files fall in one bucket; a module with a single Story is a batch of one,
+   which behaves **exactly** as the per-Story dispatch did.
+
+   Steps 1-4 above still run **per Story**, unchanged — the build, the binding
+   mode, the coverage delta, and the steering check are per-Story signals and
+   batching them would blunt exactly the mid-phase steering #1790 added. Only
+   this step batches.
+
+   After the batch's **last** Story closes, invoke the **`mutation-kill`
+   agent** once with `--file <every story file in the batch> --max-rounds 3
+   --target-honest-score <the Phase-0 mutation target>`.
+   Residual survivors trigger the **`[c]ontinue / [r]etry / [w]aive /
+   [q]uit`** prompt — the shape is `[c/r/w/q]` — applied to the batch.
+   `[c]` accepts the residual and moves on; `[r]` re-runs one more
+   mutation-kill round; `[w]` waives the residual to `waivers.json`; `[q]`
+   quits Phase 5.
+
+   **Pass the Phase-0 mutation target (#2030).** Phase 8
+   (`/quality-targets-converge`) gates on that number; without
+   `--target-honest-score` the loop runs toward survivor exhaustion instead
+   and buys full-price rounds whose work cannot change the gate's verdict.
+   Threading it is risk-neutral by construction — the honest score stays the
+   only gate, Phase 8 still measures it independently against
+   `baseline-mutation.json`, and stopping *at* the threshold cannot turn a
+   pass into a fail. Omit the flag when Phase 0 recorded no mutation target;
+   the loop then behaves exactly as it did before #2030.
+
+   **A `YIELD FLOOR` line is an operator decision, not a convergence stop.**
+   When the run is invoked with `--min-kills-per-round` and a round kills
+   fewer survivors than the floor while the file is *still below target*,
+   `mutation-kill` stops that file and logs a line prefixed
+   `YIELD FLOOR —`. That is **not** a terminal stop: route it to the same
+   `[c/r/w/q]` prompt above, carrying the line's kill count and floor into
+   the prompt so the operator can price one more round. Treating it as
+   convergence would stop a below-target file on the loop's own initiative,
+   which is precisely what #2030 declined to do.
+
+   **The gate is unchanged in coverage, only in timing.** Every Story's files
+   are still mutation-processed before Phase 5 can close, at the same rounds
+   cap, behind the same prompt: **Phase 5 may not be reported closed with an
+   unprocessed batch**, exactly as it could not close with an unprocessed
+   Story. What moves is *when within the phase* a weak assertion surfaces —
+   at the batch boundary rather than immediately — which is bounded by batch
+   size and by the fact that `mutation-kill` only ever *adds* tests, so a
+   later Story in a batch cannot be invalidated by an earlier one's residual.
+
+   **Name the batches when the phase starts**, so the operator sees the
+   grouping rather than inferring it from dispatch counts: print one line per
+   batch — `Mutation-kill batch <n>: module <module>, Stories <ids>.`
+
+   **Mutation-yield steering check at the batch boundary (issue #2033).**
+   After each batch's `mutation-kill` dispatch returns, append one record to
+   `.dev-team-reports/test-improve/<slug>/data/mutation-history.json` — the
+   git-tracked `data/` sibling of `coverage-history.json`, written atomically
+   the way the baselines are — carrying `batch`, `module`, `captured_at`,
+   `starting_survivors`, `ending_survivors`, `honest_score_before`,
+   `honest_score_after`, and `rounds_spent`. Then run the trailing-streak
+   check. Do not eyeball the history:
+
+   ```
+   sh "${CLAUDE_PLUGIN_ROOT}/hooks/py.sh" "${CLAUDE_PLUGIN_ROOT}/scripts/mutation_yield_steering.py" \
+     --history .dev-team-reports/test-improve/<slug>/data/mutation-history.json \
+     --json
+   ```
+
+   This is the #1790 mechanism ported to the more expensive lane, and it
+   shares that script's status vocabulary and exit-code contract exactly, so
+   read the exit codes the same way:
+
+   - **Exit 0** — continue to the next batch, but read *which* exit-0 status
+     came back: `ok` means the last batch actually killed survivors;
+     `insufficient_history` means too few batches have closed (or the latest
+     batch's yield could not be measured) to judge a streak;
+     `flat_streak_forming` means the latest batch did **not** clear the
+     minimum but the streak is still short of the threshold — echo that one
+     to the operator as a watch signal rather than silently treating it as
+     `ok`.
+   - **Exit 2** — the history is missing, unreadable, or corrupt. **Never
+     read this as `ok`** — it is the same trap #1790 calls out. Fix the
+     history before continuing.
+   - **Exit 3** (`flat_streak`) — two or more consecutive batches (the
+     default; `--consecutive` and `--min-kills` tune it) killed fewer than
+     the minimum net survivors. **Surface it now, at the batch boundary** —
+     per-Story would be meaningless because `mutation-kill` runs per batch.
+     Print the script's flat-batch list and running average, then prompt
+     **`[t] re-check Phase-1 targeting / [c] continue`** — the same `[t/c]`
+     shape the coverage check uses:
+     - **`[t]`** — re-read `coverage-gap-ranking.json` and re-order the
+       remaining batches into its rank order before the next dispatch.
+     - **`[c]`** — continue, recording
+       `mutation_flat_streak: <n> batches` in the phase's progress file so
+       the Phase-9 report carries the accepted signal rather than losing it.
+6. **Go mutation-kill is advisory.** On Go stacks, `mutation-kill` logs
+   survivors but makes **no commit** — the operator is instructed to apply
+   changes manually. Advisory-only handling matches the Phase-0 Go advisory,
+   and applies per batch exactly as it applied per Story.
+
+#### Pending-stub gate (`bdd-runner` mode only, issue #1391)
+
+After **all Phase-5 Stories have closed**, and only when Phase 0 selected
+`bdd-runner` binding mode, run the completion gate before Phase 5 may be
+reported closed — a hard gate, not prose:
+
+```
+python3 "${CLAUDE_PLUGIN_ROOT}/scripts/gherkin_stub_gate.py" --dir <step-definitions-dir>
+```
+
+(`<step-definitions-dir>` is wherever test-improve's own Phase 3 —
+`/gherkin-derive`'s Step 4 (stub generation) / Step 5 (output paths) — wrote
+step-definition files, recorded in `.claude/memory/test-improve/<slug>/gherkin.md`.)
+
+- **Exit 0 (no pending stubs)** — Phase 5 proceeds to the end-of-phase review
+  loop below.
+- **Non-zero (pending stubs remain)** — Phase 5 is **not done**. Surface the
+  gate's listed `file:line` pending step definitions to the operator; do not
+  report the phase closed. Route each remaining stub back into the per-Story
+  build loop (step 2 above — fill in the step definition against the parser
+  wired at Phase 3) rather than silently leaving it pending.
+- Skip entirely when binding mode is `none` or `xunit-with-annotations` (no
+  step definitions exist to gate on).
+
+#### End-of-phase review loop
+
+After **all Phase-5 Stories have closed**, run the review loop over the
+Phase-5 diff, writing evidence to
+`.claude/memory/test-improve/<slug>/phase-5-review.json`:
+
+<!-- include: references/review-loop.md -->
+See `review-loop.md` for the single-panel dispatch, the test-lens
+guarantee, the narrowed fix-confirmation, the escalation cap, and the
+fixed evidence-schema fields.
+
+**`/handoff` suggestion** (context-heavy review). Once the loop above closes, print: `Phase 5 complete. Consider running /handoff to compress context before continuing. To resume: /test-improve <repo-path> --from-phase 6 (or --from-phase with no number to auto-detect the resume point)`

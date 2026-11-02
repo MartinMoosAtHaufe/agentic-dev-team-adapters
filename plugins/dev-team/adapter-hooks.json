@@ -1,0 +1,251 @@
+{
+  "SessionStart": [
+    {
+      "script": "hooks/pending_review_notify.py",
+      "matcher": "*",
+      "timeout": 30
+    },
+    {
+      "script": "hooks/repo_review_nudge.py",
+      "matcher": "*",
+      "timeout": 30
+    },
+    {
+      "script": "hooks/mcp_json_repowise_nudge.py",
+      "matcher": "*",
+      "timeout": 30
+    },
+    {
+      "script": "hooks/codegraph_bootstrap.py",
+      "matcher": "*",
+      "timeout": 30
+    }
+  ],
+  "UserPromptSubmit": [
+    {
+      "script": "hooks/telemetry.py",
+      "matcher": "*",
+      "timeout": 30
+    }
+  ],
+  "PreToolUse": [
+    {
+      "script": "hooks/pre_tool_guard.py",
+      "matcher": "Write|Edit",
+      "timeout": 30
+    },
+    {
+      "script": "hooks/contract_version_guard.py",
+      "matcher": "Write|Edit",
+      "timeout": 30
+    },
+    {
+      "script": "hooks/refactor_test_freeze_guard.py",
+      "matcher": "Write|Edit",
+      "timeout": 30
+    },
+    {
+      "script": "hooks/boundary_events_write_guard.py",
+      "matcher": "Write|Edit",
+      "timeout": 30
+    },
+    {
+      "script": "hooks/verify_guard_edit_marker.py",
+      "matcher": "Write|Edit|NotebookEdit",
+      "timeout": 30
+    },
+    {
+      "script": "hooks/destructive_guard.py",
+      "matcher": "Bash",
+      "timeout": 30
+    },
+    {
+      "script": "hooks/refactor_test_bash_guard.py",
+      "matcher": "Bash",
+      "timeout": 30
+    },
+    {
+      "script": "hooks/pre_pr_review.py",
+      "matcher": "Bash",
+      "timeout": 30
+    },
+    {
+      "script": "hooks/internal_double_gate.py",
+      "matcher": "Bash",
+      "timeout": 30
+    },
+    {
+      "script": "hooks/pre_commit_knowledge_index.py",
+      "matcher": "Bash",
+      "timeout": 30
+    },
+    {
+      "script": "hooks/telemetry.py",
+      "matcher": "Bash",
+      "timeout": 30
+    },
+    {
+      "script": "hooks/verify_guard.py",
+      "matcher": "Bash",
+      "timeout": 30
+    },
+    {
+      "script": "hooks/bash_retry_guard.py",
+      "matcher": "Bash",
+      "timeout": 30
+    },
+    {
+      "script": "hooks/stryker_xunit_shim_guard.py",
+      "matcher": "Bash",
+      "timeout": 30
+    },
+    {
+      "script": "hooks/mutation_testing_smoke_gate.py",
+      "matcher": "Bash",
+      "timeout": 30
+    },
+    {
+      "script": "hooks/scan_bash_command_for_banned_scripts.py",
+      "matcher": "Bash",
+      "timeout": 30
+    },
+    {
+      "script": "hooks/boundary_events_write_guard.py",
+      "matcher": "Bash",
+      "timeout": 30
+    },
+    {
+      "script": "hooks/telemetry.py",
+      "matcher": "Skill",
+      "timeout": 30
+    },
+    {
+      "script": "hooks/code_intelligence_nudge.py",
+      "matcher": "Read",
+      "timeout": 30
+    },
+    {
+      "script": "hooks/code_intelligence_nudge.py",
+      "matcher": "Grep",
+      "timeout": 30
+    },
+    {
+      "script": "hooks/code_intelligence_nudge.py",
+      "matcher": "Glob",
+      "timeout": 30
+    },
+    {
+      "script": "hooks/agent_dispatch_ledger.py",
+      "matcher": "Agent|Task",
+      "timeout": 30
+    },
+    {
+      "script": "hooks/checkpoint_dispatch_instrument.py",
+      "matcher": "Agent|Task",
+      "timeout": 30
+    },
+    {
+      "script": "hooks/subagent_skill_context.py",
+      "matcher": "Agent|Task",
+      "timeout": 30
+    }
+  ],
+  "PostToolUse": [
+    {
+      "script": "hooks/js_fp_review.py",
+      "matcher": "Edit|Write",
+      "timeout": 30
+    },
+    {
+      "script": "hooks/token_efficiency_review.py",
+      "matcher": "Edit|Write",
+      "timeout": 30
+    },
+    {
+      "script": "hooks/eval_compliance_check.py",
+      "matcher": "Edit|Write",
+      "timeout": 30
+    },
+    {
+      "script": "hooks/tdd_guard.py",
+      "matcher": "Edit|Write",
+      "timeout": 30
+    },
+    {
+      "script": "hooks/knowledge_index.py",
+      "matcher": "Edit|Write",
+      "timeout": 30
+    },
+    {
+      "script": "hooks/skills_index.py",
+      "matcher": "Edit|Write",
+      "timeout": 30
+    },
+    {
+      "script": "hooks/mutation_gate.py",
+      "matcher": "Bash",
+      "timeout": 30
+    },
+    {
+      "script": "hooks/refactor_test_revert_guard.py",
+      "matcher": "Bash",
+      "timeout": 30
+    },
+    {
+      "script": "hooks/version_check.py",
+      "matcher": "Read",
+      "timeout": 30
+    },
+    {
+      "script": "hooks/code_intelligence_turn_mark.py",
+      "matcher": "mcp__codegraph__.*",
+      "timeout": 30
+    },
+    {
+      "script": "hooks/code_intelligence_turn_mark.py",
+      "matcher": "mcp__plugin_repowise_repowise__.*",
+      "timeout": 30
+    },
+    {
+      "script": "hooks/phase_marker.py",
+      "matcher": "Skill",
+      "timeout": 30
+    },
+    {
+      "script": "hooks/scan_worktree_for_banned_scripts.py",
+      "matcher": "*",
+      "timeout": 30
+    }
+  ],
+  "SessionEnd": [
+    {
+      "script": "hooks/session_learning_trigger.py",
+      "matcher": "*",
+      "timeout": 30
+    }
+  ],
+  "Stop": [
+    {
+      "script": "hooks/task_completion_metrics.py",
+      "matcher": "*",
+      "timeout": 30
+    }
+  ],
+  "SubagentStop": [
+    {
+      "script": "hooks/task_completion_metrics.py",
+      "matcher": "*",
+      "timeout": 30
+    },
+    {
+      "script": "hooks/subagent_completion_guard.py",
+      "matcher": "*",
+      "timeout": 30
+    },
+    {
+      "script": "hooks/review_verdict_recorder.py",
+      "matcher": "*",
+      "timeout": 30
+    }
+  ]
+}

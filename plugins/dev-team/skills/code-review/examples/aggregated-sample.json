@@ -1,0 +1,56 @@
+{
+  "overall": "warn",
+  "timestamp": "2026-07-05T12:00:00Z",
+  "targetFiles": 8,
+  "preFlightPassed": true,
+  "agents": [
+    {
+      "agentName": "structure-review",
+      "status": "warn",
+      "modelTier": "mid",
+      "issues": [
+        {
+          "severity": "warning",
+          "confidence": "high",
+          "file": "src/api/handler.ts",
+          "line": 15,
+          "message": "God object: handler mixes routing, validation, and persistence",
+          "suggestedFix": "Split routing, validation, and persistence into focused modules"
+        },
+        {
+          "severity": "warning",
+          "confidence": "medium",
+          "file": "src/api/handler.ts",
+          "line": 15,
+          "message": "Nesting depth 5 in the validation branch exceeds threshold of 3",
+          "suggestedFix": "Extract guard clauses into helper predicates"
+        }
+      ],
+      "summary": "2 issues found: 2 warnings"
+    },
+    {
+      "agentName": "test-review",
+      "status": "pass",
+      "modelTier": "mid",
+      "issues": [],
+      "summary": "No issues found"
+    }
+  ],
+  "totals": {"errors": 0, "warnings": 2, "suggestions": 0},
+  "tokenEstimate": {
+    "totalInputFiles": 12000,
+    "agentCount": 2,
+    "contextStrategy": "full-file"
+  },
+  "dispatchFailures": [],
+  "topFindings": [
+    {
+      "severity": "warning",
+      "agents": ["structure-review"],
+      "file": "src/api/handler.ts",
+      "line": 15,
+      "message": "handler mixes too many concerns and exceeds the nesting threshold"
+    }
+  ],
+  "summary": "WARN (1 agent passed, 1 warned, 0 failed). 2 total issues."
+}

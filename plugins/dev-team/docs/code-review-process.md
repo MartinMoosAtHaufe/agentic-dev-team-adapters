@@ -1,0 +1,302 @@
+# Code review process
+
+How `/code-review` (and its alias `/review`) works end-to-end, from invocation to final report. This page includes the auto-fix loop and the artifacts it produces.
+
+> **Authoritative source**: the skill spec at [`skills/code-review/SKILL.md`](https://github.com/bdfinst/agentic-dev-team/blob/main/plugins/dev-team/skills/code-review/SKILL.md). This document is a reader-friendly walkthrough. It links to the spec, rubric, template, and output format for details.
+
+**On this page**: [What it does](#what-it-does) · [Invocation](#invocation) · [Pipeline](#pipeline) · [Artifacts](#artifacts) · [Customization points](#customization-points) · [Relationship to other workflows](#relationship-to-other-workflows) · [Concurrent use](#concurrent-use) · [References](#references)
+
+## What it does
+
+`/code-review` is an **orchestrator-only** workflow. It does not review code itself. It dispatches a suite of focused review agents in parallel and aggregates their structured findings. It optionally auto-fixes actionable issues in a bounded loop. It produces a health-scored report.
+
+It follows the [Minimum CD agent configuration](https://migration.minimumcd.org/docs/agentic-cd/agent-configuration/) pattern. The pattern delegates all semantic analysis and minimizes the context passed to each agent. It runs cheap deterministic checks before spending tokens on AI. It returns structured results.
+
+## Invocation
+
+```bash
+/code-review                    # auto-scope
+/code-review --path src/auth    # targeted directory
+/code-review --since main       # everything changed since ref
+/code-review --all              # full repository
+/code-review --agent test-review  # single agent (delegates to /review-agent)
+/code-review --json             # machine-readable output (CI)
+/code-review --background       # drift review (no gates, structural agents only)
+/code-review --force --reason "release freeze"  # skip gates, logged
+```
+
+See the [skill spec](https://github.com/bdfinst/agentic-dev-team/blob/main/plugins/dev-team/skills/code-review/SKILL.md#parse-arguments) for the full argument list.
+
+## Pipeline
+
+```mermaid
+%%{init: {'theme': 'base', 'themeVariables': {'primaryColor': '#dbeafe', 'primaryTextColor': '#1e3a5f', 'primaryBorderColor': '#3b82f6', 'lineColor': '#64748b', 'secondaryColor': '#f1f5f9', 'tertiaryColor': '#e0f2fe', 'background': '#ffffff', 'mainBkg': '#dbeafe', 'nodeBorder': '#2563eb', 'clusterBkg': '#eff6ff', 'clusterBorder': '#bfdbfe', 'titleColor': '#1e3a5f', 'edgeLabelBackground': '#f8fafc'}}}%%
+flowchart TD
+    A[/code-review invoked/] --> B[1. Determine target files]
+    B --> C{Auto-scope}
+    C -->|dirty tree| D1[Uncommitted files]
+    C -->|clean tree| D2[Full repo]
+    D1 --> DC{1a. All files docs-only?}
+    D2 --> DC
+    DC -->|yes — no --force/--agent/--background| SC[Short-circuit: notice +<br/>write .pr-review-passed if auto-scoped + stop]
+    DC -->|no| E[1b. REVIEW-CONTEXT.md]
+    E --> F[1c. Probe MCP tools]
+    F --> G[2. Pre-flight gates]
+    G -->|fail| X1[Stop — no agents run]
+    G -->|pass| H[2b. Static analysis pre-pass]
+    H --> I[3. Select enabled agents]
+    I --> J[4. Dispatch agents in parallel]
+    J --> K[5. Apply ACCEPTED-RISKS suppression]
+    K --> L[5b. Compute health score]
+    L --> M{Actionable issues?}
+    M -->|no| R[7. Generate report]
+    M -->|yes| N[6. Ask: fix or report only?]
+    N -->|report only| R
+    N -->|fix| O[6a. Review-fix loop<br/>max 5 iterations]
+    O --> P{Converged?}
+    P -->|yes| R
+    P -->|no| Q[Escalate remaining to human]
+    Q --> R
+    R --> S[8. Save correction prompts]
+    S --> T[9. Write .pr-review-passed if applicable]
+```
+
+### 1. Determine target files
+
+File scope is resolved with this priority: `--path` → `--since` → `--all` → **auto-scope**.
+
+Auto-scope (the default) runs `git diff --name-only` plus `git diff --cached --name-only`. If either shows changes, the target set is only those files. If the working tree is clean, the target set is the full repository.
+
+| File count (full-repo mode) | Behavior |
+| ----------------------------- | ---------- |
+| ≤ 200 | Proceed |
+| 201–500 | Warn, proceed |
+| > 500 | Warn and request confirmation |
+
+### 1a. Documentation-only short-circuit
+
+After the target set is known, if **every** file is documentation, `/code-review` short-circuits. It emits `Documentation-only changeset — skipping code review`. When auto-scoped to uncommitted changes, it writes the `.pr-review-passed` gate file so the eventual `gh pr create` is not blocked (#1886). It then stops before any gate or agent runs. In `--json` mode it emits `{"status": "skipped", "reason": "documentation-only"}`.
+
+Documentation = `.md`/`.mdx`/`.rst`/`.txt`/`.adoc`, `docs/**`, and root docs (`README*`, `CHANGELOG*`, `LICENSE*`, …). The exception is **functional Claude-config markdown** (`.claude/**`, `agents/`, `skills/`, `prompts/`, `knowledge/`, `templates/agents/`, `CLAUDE.md`, `AGENTS.md`). `/code-review` always reviews that markdown. `--force --reason`, `--agent`, and `--background` bypass the short-circuit.
+
+### 1b. Institutional context
+
+If `REVIEW-CONTEXT.md` exists at the repo root, the orchestrator reads its contents and passes them to every agent as "Institutional context provided for this review". A team records domain knowledge, related services, known quirks, or architectural history here that agents cannot discover from code alone. The file is optional.
+
+### 1c. Optional MCP tools
+
+The orchestrator probes for enhanced analysis tools (RoslynMCP, code knowledge graph, documentation MCP, Semgrep) and records availability. Agents fall back to Glob/Grep/Read when a tool is unavailable. All agents work without these tools. Tool availability appears in the final report.
+
+### 2. Pre-flight gates (fail fast, fail cheap)
+
+Deterministic checks run before any AI agent is invoked. Cheaper checks block expensive ones.
+
+| # | Gate | Tool | Stops on |
+| --- | ------ | ------ | ---------- |
+| 1 | Lint | `npx eslint` (or project's lint) | errors |
+| 2 | Type check | `npx tsc --noEmit` (if `tsconfig.json` exists) | errors |
+| 3 | Secret scan | grep for common secret patterns | any match |
+| 4 | Semgrep SAST | `semgrep scan --config auto` | ERROR-severity findings |
+| 5 | Pipeline-red check | `gh run list` on current branch | failing CI (warn only) |
+
+The pipeline skips missing tools silently. Gate failures stop the pipeline, and no agents run. `--force --reason "<text>"` skips all gates (and the step-1a documentation-only short-circuit) and logs an entry to `.claude/metrics/override-audit.jsonl`. `--background` skips gates entirely.
+
+### 2b. Static analysis pre-pass
+
+If static analysis tools are available (Semgrep, ESLint, TypeScript, Ruff, mypy), they run against the target files and collect structured findings. The pipeline **deduplicates results across tools** and injects them into each agent's prompt as pre-confirmed context:
+
+> "These issues were detected by static analysis tools. Do not re-report them. Focus on semantic and architectural concerns."
+
+Unlike pre-flight gates, the pre-pass never stops the pipeline. Its purpose is to give agents a head start. If Semgrep already ran in gate 4, the pre-pass reuses those findings rather than re-collecting them. See [`skills/static-analysis-integration/SKILL.md`](https://github.com/bdfinst/agentic-dev-team/blob/main/plugins/dev-team/skills/static-analysis-integration/SKILL.md) for detection, execution, and deduplication rules.
+
+### 3. Select enabled agents
+
+All review agents in `agents/*.md` that declare an `effort:` band are enabled by default. Two language-agnostic agents always run regardless of tech stack:
+
+- `doc-review` — README, API docs, inline comments, ADRs
+- `arch-review` — layer boundaries, dependency direction, pattern consistency
+
+`claude-setup-review`, `token-efficiency-review`, and `ai-provenance-review` are deliberately absent (#1733).
+
+- `claude-setup-review` reviews the **harness** rather than the changeset, so it had nothing to say about a diff. `Scope: always` put it in an 18-lens panel for a two-file JavaScript change in a project with no Claude configuration at all.
+- `token-efficiency-review` (CLAUDE.md/rule verbosity, file-size drift) and `ai-provenance-review` (AI-provenance verification debt) review properties of the whole tree, not any single diff. This is the same reason.
+
+The whole-tree `/repo-review` command now dispatches all three. `claude-setup-review` also stays reachable on demand via `/claude-setup-review`.
+
+A project-local `review-config.json` can disable specific agents. `--background` mode restricts the run to `doc-review`, `arch-review`, `naming-review`, and `structure-review`.
+
+### 4. Dispatch agents in parallel
+
+The orchestrator spawns each enabled agent as a sub-agent via the Agent tool, all in a single message for maximum parallelism. Each sub-agent:
+
+- Runs in isolation (context is **not** shared with the parent).
+- Receives only the files matching its declared scope (for example, `js-fp-review` gets JS/TS only).
+- Receives the minimum context its `Context needs` field requires.
+
+| `Context needs` | Input | When to use |
+| ----------------- | ------- | ------------- |
+| `diff-only` | Git diff output only | Pattern-matching agents (naming, FP) |
+| `full-file` | Complete file contents | Agents needing function-level context |
+| `project-structure` | Full files + directory tree | Agents reasoning about architecture |
+
+When the target is the full repository (`--all`, `--path`, or clean auto-scope), agents always receive full files regardless of `Context needs`.
+
+**Model selection** is per agent, not orchestrator-controlled. Each
+agent declares `model:` (an alias, a full model ID, or `inherit`) and
+`effort:` directly in its frontmatter. This is the native Claude Code sub-agent
+contract, and the harness resolves it before dispatch (ADR 0026).
+
+Each agent returns a JSON result: `{agentName, status, modelTier, issues[], summary}`. See [`skills/code-review/output-format.md`](https://github.com/bdfinst/agentic-dev-team/blob/main/plugins/dev-team/skills/code-review/output-format.md).
+
+### 5. Aggregate results
+
+**5a. ACCEPTED-RISKS suppression.** If `ACCEPTED-RISKS.md` exists at the repo root, the orchestrator applies its YAML rules in declaration order. The first matching rule suppresses a finding and emits a one-line audit entry. Expired rules become inert and emit a WARN. Broad rules (wildcard `rule_id` or multi-file globs) emit an informational notice. Schema-invalid rules fail the run. Suppressed findings bypass the fix loop. They appear in a dedicated report section grouped by rule id. See [`knowledge/accepted-risks-schema.md`](https://github.com/bdfinst/agentic-dev-team/blob/main/plugins/dev-team/knowledge/accepted-risks-schema.md).
+
+**5b. Health scoring** per [`knowledge/review-rubric.md`](https://github.com/bdfinst/agentic-dev-team/blob/main/plugins/dev-team/knowledge/review-rubric.md):
+
+| Score | Condition |
+| ------- | ----------- |
+| 🟢 HEALTHY | 0 fail AND ≤ 2 warn |
+| 🟠 NEEDS ATTENTION | 1–2 fail OR 3+ warn |
+| 🔴 CRITICAL | 3+ fail OR any `security-review` fail |
+
+**Actionability classification** determines what the fix loop touches.
+The loop auto-applies error/warning findings at high or medium confidence.
+Everything else (any `confidence: none`, and all suggestions) is report-only.
+The canonical rubric (severity × confidence → actionable) lives in the
+[review-corrections flow](triage-workflow.md#4-the-review-corrections-flow).
+
+### 6. Fix or report only?
+
+If there are zero actionable issues, skip to report generation. Otherwise the orchestrator presents a summary and asks the user:
+
+> **"Fix these issues automatically, or save as report only?"**
+
+- **Fix** → enter the review-fix loop.
+- **Report only** → skip to report generation with all findings intact.
+
+**Exception — non-interactive mode**: when `/code-review` runs inside `/build` or `/pr`, `/code-review` skips the prompt and the fix loop runs automatically. The caller already owns the human gate: the Orchestrator's Phase 3 approval for `/build`, and the pre-PR confirmation for `/pr`.
+
+### 6a. Review-fix loop
+
+```
+iteration = 1
+while actionable_issues > 0 and iteration ≤ 5:
+    1. Apply fixes (file-by-file, top-to-bottom by line number)
+    2. Run tests; if tests fail, revert the last fix and mark it human-required
+    3. Re-run only the agents that reported actionable issues, against only the modified files
+    4. Re-aggregate: merge new results with carry-forward passes
+    5. iteration += 1
+```
+
+**Exit conditions**:
+
+| Condition | Outcome |
+| ----------- | --------- |
+| Zero actionable issues | Converged → generate report |
+| Iteration limit (5) reached | Escalate remaining issues to human |
+| Same issues persist after fix attempt | Not converging → exit and escalate |
+| Test failure after fix + revert | Mark issue human-required, continue |
+
+The final report includes a loop table showing iterations, issues fixed, and agents re-run.
+
+### 7. Generate report
+
+Output format depends on the `--json` flag:
+
+- **JSON** — a single aggregated object with overall status, per-agent results, totals, fix summary, and token estimate. CI can consume it.
+- **Prose** — a markdown report following [`knowledge/review-template.md`](https://github.com/bdfinst/agentic-dev-team/blob/main/plugins/dev-team/knowledge/review-template.md). It contains a summary table, pre-flight status, institutional context, issues by file (sorted by severity), a loop iteration table, recommendations, and tool availability.
+
+The report tags remaining issues (not auto-fixed) as `[confidence: none]`, `[auto-fix failed — human review required]`, or `[suggestion]`.
+
+### 8. Correction prompts
+
+For every unfixed actionable issue, plus suggestions worth addressing, the orchestrator writes a correction prompt JSON to `corrections/`. Each prompt includes priority, confidence, category, instruction, context, affected files, and `autoFixResult`. You can address these manually or with [`/apply-fixes`](https://github.com/bdfinst/agentic-dev-team/blob/main/plugins/dev-team/skills/apply-fixes/SKILL.md).
+
+[triage-workflow.md](triage-workflow.md) documents the full lifecycle of these files, from discovery to applied fix. It includes who owns a `corrections/*.json` after its branch merges.
+
+### 9. Pre-PR gate file
+
+The orchestrator writes `.pr-review-passed` to `.claude/memory/` (#1886) when all of these hold:
+
+- The review was auto-scoped to uncommitted changes.
+- The final status is `pass` or `warn`.
+- Step 6a's fix loop (if it ran) did not exit with actionable issues still outstanding.
+
+The file holds a SHA-256 hash of the branch's diff against its base (`git diff <base>...HEAD`), not just the staged patch. An edit or commit after review changes this hash and invalidates the gate:
+
+```bash
+HASH=$(python3 "${CLAUDE_PLUGIN_ROOT}/hooks/lib/review_gate_hash.py" --branch-diff)
+mkdir -p .claude/memory && echo "$HASH" > .claude/memory/.pr-review-passed
+```
+
+Always use this shared helper, not a hand-rolled `git diff | shasum` pipeline. The helper pins several git config overrides (relative-path scoping, external diff drivers, submodule visibility) that a raw pipeline would not.
+
+**#1886: the gate moved from `git commit` to `gh pr create`.** `hooks/pre_pr_review.py` reads `.claude/memory/.pr-review-passed` at PR-creation time. The hash binds to the branch's diff vs. its base (`branch_diff_gate_hash()`), not the staged-patch hash (`review_gate_hash()`) that the retired `.review-passed` used. `hooks/pre_commit_review.py` (the former reader of `.review-passed`) is now a documented no-op. This step no longer writes `.review-passed`, and nothing reads it.
+
+**Known limitation.** `agent_dispatch_ledger.py` still stamps every dispatch's corroborating evidence with the staged-patch hash, never the branch-diff hash. The two are identical only in the common single-commit-then-PR shape: branch cut from base, reviewed once while staged, committed, then a PR opened immediately. A branch with multiple separate review-and-commit cycles correctly fails this gate at `gh pr create` time. It needs a fresh `/code-review` run against its current diff. A follow-up tracks closing this for every shape. This release does not fix it.
+
+### Reasoned bypass (`PR_GATE_BYPASS_REASON`)
+
+**#1886:** `git commit --no-verify`/`-n` + `GATE_BYPASS_REASON` was the
+historical bypass for the commit-time gate. Both still work as ordinary git
+flags/env vars. However, `hooks/pre_commit_review.py` no longer reads either, so
+they no longer gate anything at commit time.
+
+The current gate (`hooks/pre_pr_review.py`, triggered by `gh pr create`)
+requires a non-empty `PR_GATE_BYPASS_REASON` environment variable to bypass it.
+`gh` has no native `--no-verify`-shaped flag, so the env var alone is both
+the trigger and the reason:
+
+```bash
+PR_GATE_BYPASS_REASON="hotfix, review to follow" gh pr create ...
+```
+
+With the variable set, the hook allows the PR to open. It appends an accountability
+line to `.claude/metrics/gate-bypass-audit.jsonl`, unconditionally. The line contains the timestamp, branch, triggering mechanism, reason,
+branch-diff file count, and plugin version. `DEV_TEAM_TELEMETRY` does not gate this log. The accountability posture matches the original
+commit-time bypass (#709), relocated to the new trigger point (#1886).
+
+## Artifacts
+
+| Artifact | When | Purpose |
+| ---------- | ------ | --------- |
+| Stdout report (markdown or JSON) | Every run | Human or CI consumption |
+| `corrections/*.json` | When unfixed actionable or suggestion issues remain | Feeds `/apply-fixes` |
+| `.pr-review-passed` | Auto-scoped clean/warn runs | Read by `hooks/pre_pr_review.py` at `gh pr create` time (#1886 — see § 9 above) |
+| `.claude/metrics/override-audit.jsonl` | `--force --reason ...` | Audit trail for skipped gates |
+| `.claude/metrics/gate-bypass-audit.jsonl` | `gh pr create` with `PR_GATE_BYPASS_REASON` set (#1886) | Audit trail for reasoned pre-PR-gate bypasses |
+
+## Customization points
+
+| File | Location | Effect |
+| ------ | ---------- | -------- |
+| `review-config.json` | Project root | Disables specific agents per project |
+| `REVIEW-CONTEXT.md` | Project root | Injects institutional knowledge into every agent's prompt |
+| `ACCEPTED-RISKS.md` | Project root | Suppresses known findings with audit trail and expiry |
+
+All three are optional and project-local. They are not part of the plugin.
+
+## Relationship to other workflows
+
+- **Inline review checkpoints** (Phase 3 of `/build`) use the same review-fix loop mechanics. The orchestrator selects a **targeted** subset of agents based on what changed in the unit of work. `/code-review` is the **final gate** before commit and runs the full enabled suite.
+- **[`/review-agent`](https://github.com/bdfinst/agentic-dev-team/blob/main/plugins/dev-team/skills/review-agent/SKILL.md)** runs a single agent. Use it for targeted checks. It is also the worker for inline checkpoints.
+- **[`/apply-fixes`](https://github.com/bdfinst/agentic-dev-team/blob/main/plugins/dev-team/skills/apply-fixes/SKILL.md)** consumes the `corrections/` directory produced here.
+- **[`/pr`](https://github.com/bdfinst/agentic-dev-team/blob/main/plugins/dev-team/skills/pr/SKILL.md)** runs `/code-review --json` as part of its pre-PR quality gate. It runs non-interactively (the fix loop auto-applies, with no "fix or report?" prompt). `/pr` branches on the returned status. `overall: pass/warn` or `status: skipped` proceeds. `overall: fail` re-engages the user.
+
+## Concurrent use
+
+The `.pr-review-passed` gate is a single, gitignored file per working tree. Two
+agents sharing **one** checkout therefore overwrite each other's gate. Give each
+concurrent agent its own git worktree. [concurrent-use.md](concurrent-use.md) has the full rationale and setup.
+
+## References
+
+- [Skill spec](https://github.com/bdfinst/agentic-dev-team/blob/main/plugins/dev-team/skills/code-review/SKILL.md) — operational detail for the orchestrator
+- [Triage workflow](triage-workflow.md) — the discovery-to-applied-fix lifecycle: `/triage`, correction prompts, `/apply-fixes`, and leftover-corrections ownership
+- [Concurrent use](concurrent-use.md) — one worktree per agent; why the gate is per-checkout
+- [Output format](https://github.com/bdfinst/agentic-dev-team/blob/main/plugins/dev-team/skills/code-review/output-format.md) — per-agent JSON, aggregated JSON, correction prompts
+- [Report template](https://github.com/bdfinst/agentic-dev-team/blob/main/plugins/dev-team/knowledge/review-template.md) — prose report structure
+- [Scoring rubric](https://github.com/bdfinst/agentic-dev-team/blob/main/plugins/dev-team/knowledge/review-rubric.md) — health scoring and severity mapping
+- [Agent catalog](agent_info.md) — list of review agents and what each checks
+- [Architecture](agent-architecture.md) — where `/code-review` fits in the three-phase workflow
