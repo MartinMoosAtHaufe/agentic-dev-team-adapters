@@ -12,8 +12,10 @@ Copilot interprets their frontmatter; this adapter does not select the main
 session's model. The declarations and mappings below guide parent task dispatch.
 Apply explicit user invocation overrides first. Otherwise, when dispatching a
 dev-team agent, pass its mapped model through the native task model argument.
-When using file-based mappings, reread the runtime mapping file before choosing
-the task model so edits do not require rebuilding or restarting the plugin.
+When using file-based mappings, reread the runtime mapping files in listed order
+and merge aliases before choosing the task model. Later files override earlier
+aliases. Edits do not require rebuilding or restarting the plugin.
+A missing default user file contributes no mappings; report invalid files.
 For omitted or inherit declarations, or a mapping to inherit, omit the task model
 argument. Copilot still resolves agent preferences; omitting an override does
 not erase an explicit model preference in the original agent frontmatter.

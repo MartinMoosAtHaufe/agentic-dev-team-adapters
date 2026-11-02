@@ -6,7 +6,6 @@
         "type": "command",
         "command": "python \"${PLUGIN_ROOT}/_copilot_adapter.py\" hook SessionStart",
         "bash": "python3 \"${PLUGIN_ROOT}/_copilot_adapter.py\" hook SessionStart",
-        "powershell": "python \"${PLUGIN_ROOT}\\_copilot_adapter.py\" hook SessionStart",
         "timeoutSec": 130
       }
     ],
@@ -15,7 +14,6 @@
         "type": "command",
         "command": "python \"${PLUGIN_ROOT}/_copilot_adapter.py\" hook UserPromptSubmit",
         "bash": "python3 \"${PLUGIN_ROOT}/_copilot_adapter.py\" hook UserPromptSubmit",
-        "powershell": "python \"${PLUGIN_ROOT}\\_copilot_adapter.py\" hook UserPromptSubmit",
         "timeoutSec": 40
       }
     ],
@@ -24,7 +22,6 @@
         "type": "command",
         "command": "python \"${PLUGIN_ROOT}/_copilot_adapter.py\" hook PreToolUse",
         "bash": "python3 \"${PLUGIN_ROOT}/_copilot_adapter.py\" hook PreToolUse",
-        "powershell": "python \"${PLUGIN_ROOT}\\_copilot_adapter.py\" hook PreToolUse",
         "timeoutSec": 730
       }
     ],
@@ -33,7 +30,6 @@
         "type": "command",
         "command": "python \"${PLUGIN_ROOT}/_copilot_adapter.py\" hook PostToolUse",
         "bash": "python3 \"${PLUGIN_ROOT}/_copilot_adapter.py\" hook PostToolUse",
-        "powershell": "python \"${PLUGIN_ROOT}\\_copilot_adapter.py\" hook PostToolUse",
         "timeoutSec": 400
       }
     ],
@@ -42,7 +38,6 @@
         "type": "command",
         "command": "python \"${PLUGIN_ROOT}/_copilot_adapter.py\" hook SessionEnd",
         "bash": "python3 \"${PLUGIN_ROOT}/_copilot_adapter.py\" hook SessionEnd",
-        "powershell": "python \"${PLUGIN_ROOT}\\_copilot_adapter.py\" hook SessionEnd",
         "timeoutSec": 40
       }
     ],
@@ -51,7 +46,6 @@
         "type": "command",
         "command": "python \"${PLUGIN_ROOT}/_copilot_adapter.py\" hook Stop",
         "bash": "python3 \"${PLUGIN_ROOT}/_copilot_adapter.py\" hook Stop",
-        "powershell": "python \"${PLUGIN_ROOT}\\_copilot_adapter.py\" hook Stop",
         "timeoutSec": 40
       }
     ],
@@ -60,7 +54,6 @@
         "type": "command",
         "command": "python \"${PLUGIN_ROOT}/_copilot_adapter.py\" hook SubagentStop",
         "bash": "python3 \"${PLUGIN_ROOT}/_copilot_adapter.py\" hook SubagentStop",
-        "powershell": "python \"${PLUGIN_ROOT}\\_copilot_adapter.py\" hook SubagentStop",
         "timeoutSec": 100
       }
     ],
@@ -69,7 +62,6 @@
         "type": "command",
         "command": "python \"${PLUGIN_ROOT}/_copilot_adapter.py\" hook subagentStart",
         "bash": "python3 \"${PLUGIN_ROOT}/_copilot_adapter.py\" hook subagentStart",
-        "powershell": "python \"${PLUGIN_ROOT}\\_copilot_adapter.py\" hook subagentStart",
         "timeoutSec": 30
       }
     ]
