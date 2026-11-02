@@ -475,12 +475,13 @@ def normalize_payload(payload: dict) -> dict:
 
 def invocation_payloads(payload: dict, event: str) -> list[dict]:
     normalized = normalize_payload(payload)
+    normalized["hook_event_name"] = "SubagentStart" if event == "subagentStart" else event
     args = normalized["tool_input"]
     patch = args.get("input") or args.get("patch") or args.get("patchText")
-    is_patch = payload.get("tool_name") == "apply_patch" or (
+    is_patch = payload.get("tool_name", payload.get("toolName")) == "apply_patch" or (
         normalized["tool_name"] == "Edit" and patch is not None
     )
-    if not is_patch or event != "PreToolUse":
+    if not is_patch or event not in {"PreToolUse", "PostToolUse"}:
         return [normalized]
     if not isinstance(patch, str):
         raise TypeError("Cannot guard apply_patch: no recognized patch input")
@@ -570,7 +571,13 @@ def run_hook(event: str, payload: dict, plugin: Path = HOME) -> tuple[dict, int]
         command = normalized["tool_input"].get("command", "")
         if not isinstance(command, str):
             raise ValueError("Shell command must be a string")
-        tokens = [token.strip("'\"") for token in shlex.split(command, posix=False)]
+        routing_command = command
+        if payload.get("tool_name", payload.get("toolName")) == "powershell":
+            # shlex does not understand PowerShell here-string delimiters.
+            routing_command = re.sub(
+                r"""(?ms)@(['"])[ \t]*\r?\n.*?^\1@""", "''", routing_command,
+            )
+        tokens = [token.strip("'\"") for token in shlex.split(routing_command, posix=False)]
         basenames = [re.split(r"[/\\]", token)[-1] for token in tokens]
         invokes_python = any(
             re.fullmatch(r"python(?:3(?:\.\d+)?)?(?:\.exe)?", name)
