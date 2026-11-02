@@ -108,6 +108,11 @@ destination and translates decisions, context and task argument updates.
 Known Claude-only compaction and cost hooks are omitted explicitly. Unknown
 upstream events, commands or options fail generation rather than disappearing.
 
+The bridge supplies Claude-style hook event names. Patch calls supply each
+affected file path to pre-edit and post-edit hooks, including move destinations.
+PowerShell here-strings are masked only for adapter launcher detection.
+Upstream shell hooks receive the original command unchanged.
+
 Shell guards reject recognized Claude commands and statically detected
 Claude-backed script entrypoints with native-workflow guidance. This routing
 guard is not a general shell parser or a security boundary.

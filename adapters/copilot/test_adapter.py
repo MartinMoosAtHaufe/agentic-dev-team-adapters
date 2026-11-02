@@ -66,6 +66,21 @@ class AdapterTests(unittest.TestCase):
         environment.start()
         self.addCleanup(environment.stop)
 
+    def use_upstream_hook(self, event: str, matcher: str, script: str) -> None:
+        hooks = marketplace.REPOSITORY / "plugins" / "dev-team" / "hooks"
+        shutil.copytree(hooks / "lib", self.source / "hooks" / "lib", dirs_exist_ok=True)
+        shutil.copyfile(hooks / script, self.source / "hooks" / script)
+        config = adapter.read_json(self.source / "hooks" / "hooks.json")
+        config["hooks"].setdefault(event, []).append({
+            "matcher": matcher,
+            "hooks": [{
+                "type": "command",
+                "command": 'sh "${CLAUDE_PLUGIN_ROOT}/hooks/py.sh" '
+                f'"${{CLAUDE_PLUGIN_ROOT}}/hooks/{script}"',
+            }],
+        })
+        adapter.write_json(self.source / "hooks" / "hooks.json", config)
+
     def test_projection_preserves_source_and_refreshes_new_hooks(self) -> None:
         (self.source / "agents" / "reviewer.md").write_bytes(
             b'---\r\nname: reviewer\r\nmodel: "haiku" # source preference\r\n'
@@ -537,6 +552,92 @@ class AdapterTests(unittest.TestCase):
         })
         self.assertEqual("new", normalized["tool_input"]["content"])
 
+    def test_real_post_edit_hooks_receive_native_patch_destinations(self) -> None:
+        self.use_upstream_hook("PostToolUse", "Edit|Write", "js_fp_review.py")
+        plugin = adapter.prepare_plugin()
+        for name, content in [
+            ("first.ts", "first.push(1)"),
+            ("second.ts", "second.pop()"),
+            ("moved file.ts", "moved.sort()"),
+        ]:
+            (self.root / name).write_text(content, encoding="utf-8")
+        patch_text = (
+            "*** Begin Patch\r\n*** Add File: first.ts\r\n"
+            "*** Update File: second.ts\r\n*** Update File: second.ts\r\n"
+            "*** Update File: old.ts\r\n*** Move to: moved file.ts\r\n"
+            "*** Delete File: gone.ts\r\n*** End Patch"
+        )
+        for payload in [
+            {"toolName": "apply_patch", "toolArgs": patch_text},
+            {"toolName": "apply_patch", "toolArgs": {"input": patch_text}},
+            {"tool_name": "apply_patch", "tool_input": {"patchText": patch_text}},
+        ]:
+            with self.subTest(payload=payload):
+                output, _ = adapter.run_hook("PostToolUse", {
+                    "cwd": str(self.root), **payload,
+                }, plugin)
+                warnings = output.get("additionalContext", "")
+                for content in ["first.push(1)", "second.pop()", "moved.sort()"]:
+                    self.assertEqual(1, warnings.count(content), warnings)
+
+    def test_real_telemetry_receives_authoritative_hook_events(self) -> None:
+        self.use_upstream_hook("UserPromptSubmit", "*", "telemetry.py")
+        self.use_upstream_hook("PreToolUse", "Skill", "telemetry.py")
+        plugin = adapter.prepare_plugin()
+        home = self.root / "isolated-home"
+        (home / ".claude").mkdir(parents=True)
+        adapter.write_json(home / ".claude" / "telemetry.json", {"enabled": True})
+        with patch.dict(os.environ, {
+            "HOME": str(home), "USERPROFILE": str(home), "DEV_TEAM_TELEMETRY": "",
+        }):
+            for prompt in ["/review", "pause"]:
+                adapter.run_hook("UserPromptSubmit", {
+                    "cwd": str(self.root), "sessionId": "hook-event-test",
+                    "prompt": prompt, "hook_event_name": "incorrect-input-event",
+                }, plugin)
+            adapter.run_hook("PreToolUse", {
+                "cwd": str(self.root), "toolName": "skill",
+                "toolArgs": {"skill": "example"},
+            }, plugin)
+        events = [
+            json.loads(line) for line in
+            (home / ".claude" / "metrics" / "telemetry.jsonl").read_text().splitlines()
+        ]
+        self.assertEqual(
+            [("command", "review"), ("skill", "example")],
+            [(event["event"], event["name"]) for event in events],
+        )
+        boundary = json.loads(
+            (self.root / ".claude" / "metrics" / "boundary-events.jsonl").read_text(),
+        )
+        self.assertEqual("UserPromptSubmit", boundary["tool"])
+        self.assertEqual("pause", boundary["matched_rule"])
+        self.assertEqual("hook-event-test", boundary["session_id"])
+
+    def test_real_shell_hook_runs_for_valid_powershell_here_strings(self) -> None:
+        self.use_upstream_hook("PreToolUse", "Bash", "destructive_guard.py")
+        plugin = adapter.prepare_plugin()
+        for quote, newline in [("'", "\n"), ('"', "\r\n")]:
+            with self.subTest(quote=quote, newline=newline):
+                other = '"' if quote == "'" else "'"
+                command = (
+                    f"$text = @{quote}{newline}"
+                    f"An unmatched {other} quote; git reset --hard{newline}"
+                    f"{quote}@{newline}Write-Output $text"
+                )
+                output, _ = adapter.run_hook("PreToolUse", {
+                    "cwd": str(self.root), "toolName": "powershell",
+                    "toolArgs": {"command": command},
+                }, plugin)
+                self.assertNotIn("permissionDecision", output)
+                self.assertIn("CAUTION", output.get("additionalContext", ""))
+                output, _ = adapter.run_hook("PreToolUse", {
+                    "cwd": str(self.root), "toolName": "powershell",
+                    "toolArgs": {"command": command + "\n& claude -p 'Do work'"},
+                }, plugin)
+                self.assertEqual("deny", output["permissionDecision"])
+                self.assertIn("Claude subprocess workflow", output["permissionDecisionReason"])
+
     def test_denial_and_stop_block_cannot_be_overwritten(self) -> None:
         hooks = adapter.read_json(self.source / "hooks" / "hooks.json")
         hooks["hooks"]["PreToolUse"][0]["hooks"].append({
@@ -562,10 +663,15 @@ class AdapterTests(unittest.TestCase):
         self.assertEqual("block", output["decision"])
 
     def test_malformed_patch_does_not_bypass_guards(self) -> None:
-        with self.assertRaisesRegex(TypeError, "Cannot guard apply_patch"):
-            adapter.invocation_payloads({
-                "tool_name": "apply_patch", "tool_input": {"unrecognized": "patch"},
-            }, "PreToolUse")
+        for event in ["PreToolUse", "PostToolUse"]:
+            for key, args in [("tool_name", "tool_input"), ("toolName", "toolArgs")]:
+                with (
+                    self.subTest(event=event, key=key),
+                    self.assertRaisesRegex(TypeError, "Cannot guard apply_patch"),
+                ):
+                    adapter.invocation_payloads({
+                        key: "apply_patch", args: {"unrecognized": "patch"},
+                    }, event)
 
     def test_bootstrap_is_injected_without_user_prompt(self) -> None:
         plugin = adapter.prepare_plugin(self.source)
