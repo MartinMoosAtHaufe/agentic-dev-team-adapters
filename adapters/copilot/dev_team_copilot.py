@@ -63,8 +63,10 @@ Copilot interprets their frontmatter; this adapter does not select the main
 session's model. The declarations and mappings below guide parent task dispatch.
 Apply explicit user invocation overrides first. Otherwise, when dispatching a
 dev-team agent, pass its mapped model through the native task model argument.
-When using file-based mappings, reread the runtime mapping file before choosing
-the task model so edits do not require rebuilding or restarting the plugin.
+When using file-based mappings, reread the runtime mapping files in listed order
+and merge aliases before choosing the task model. Later files override earlier
+aliases. Edits do not require rebuilding or restarting the plugin.
+A missing default user file contributes no mappings; report invalid files.
 For omitted or inherit declarations, or a mapping to inherit, omit the task model
 argument. Copilot still resolves agent preferences; omitting an override does
 not erase an explicit model preference in the original agent frontmatter.
@@ -267,39 +269,54 @@ def hook_specs(source: Path) -> dict[str, list[dict]]:
     return events
 
 
-def runtime_models() -> tuple[Path, dict[str, str]]:
+def runtime_models(cwd: Path | None = None) -> tuple[list[Path], dict[str, str]]:
+    cwd = (cwd or Path.cwd()).resolve()
     configured = os.environ.get("DEV_TEAM_COPILOT_CONFIG")
-    path = (
-        Path(configured).expanduser() if configured else
+    paths = [cwd / Path(configured).expanduser()] if configured else [
         Path(os.environ.get("COPILOT_HOME", str(Path.home() / ".copilot")))
         / "dev-team" / "models.json"
-    )
-    try:
-        config = read_json(path)
-    except FileNotFoundError:
-        if configured:
-            raise
-        return path, {}
-    if set(config) - {"models"}:
-        raise ValueError(f"Unknown runtime configuration fields in {path}")
-    models = config.get("models")
-    if not isinstance(models, dict) or any(
-        not isinstance(value, str) or not value or any(char.isspace() for char in value)
-        for pair in models.items() for value in pair
-    ):
-        raise ValueError(f"models must map nonempty upstream names to model IDs or inherit: {path}")
-    return path, models
+    ]
+    if not configured:
+        for directory in (cwd, *cwd.parents):
+            project = directory / ".github" / "copilot" / "dev-team" / "models.json"
+            try:
+                project.stat()
+            except FileNotFoundError:
+                pass
+            else:
+                paths.append(project)
+                break
+            if (directory / ".git").exists():
+                break
+    models: dict[str, str] = {}
+    for index, path in enumerate(paths):
+        try:
+            config = read_json(path)
+        except FileNotFoundError:
+            if configured or index:
+                raise
+            continue
+        if set(config) - {"models"}:
+            raise ValueError(f"Unknown runtime configuration fields in {path}")
+        layer = config.get("models")
+        if not isinstance(layer, dict) or any(
+            not isinstance(value, str) or not value or any(char.isspace() for char in value)
+            for pair in layer.items() for value in pair
+        ):
+            raise ValueError(f"models must map nonempty upstream names to model IDs or inherit: {path}")
+        models.update(layer)
+    return paths, models
 
 
-def runtime_context(plugin: Path, agent: str | None = None) -> str:
-    path, models = runtime_models()
+def runtime_context(plugin: Path, agent: str | None = None, cwd: Path | None = None) -> str:
+    paths, models = runtime_models(cwd)
     state = read_json(plugin / "adapter-state.json")
     declarations = state["agent_models"]
     notes = [
         (plugin / "COPILOT-BOOTSTRAP.txt").read_text(encoding="utf-8"),
         f"Plugin root: {plugin}",
-        f"Runtime mapping file: {path}",
-        "Current user model mappings: " + json.dumps(models, sort_keys=True),
+        "Runtime mapping files (lowest priority first):\n" + "\n".join(map(str, paths)),
+        "Current effective model mappings: " + json.dumps(models, sort_keys=True),
     ]
     if agent:
         name = agent.removeprefix("dev-team:")
@@ -382,12 +399,10 @@ def prepare_plugin(source: Path | str | None = None) -> Path:
         for event in dict.fromkeys([*specs, "subagentStart", "PreToolUse"]):
             entries = specs.get(event, [])
             bash = f'python3 "${{PLUGIN_ROOT}}/_copilot_adapter.py" hook {event}'
-            powershell = f'python "${{PLUGIN_ROOT}}\\_copilot_adapter.py" hook {event}'
             hooks[event] = [{
                 "type": "command",
                 "command": f'python "${{PLUGIN_ROOT}}/_copilot_adapter.py" hook {event}',
                 "bash": bash,
-                "powershell": powershell,
                 "timeoutSec": max(30, sum(entry["timeout"] for entry in entries) + 10),
             }]
         manifest["hooks"] = "hooks.json"
@@ -531,7 +546,7 @@ def run_hook(event: str, payload: dict, plugin: Path = HOME) -> tuple[dict, int]
     combined: dict = {}
     notes: list[str] = []
     if event == "SessionStart":
-        notes.append(runtime_context(plugin))
+        notes.append(runtime_context(plugin, cwd=Path(payload["cwd"])))
     normalized = normalize_payload(payload)
     declared_agents = read_json(plugin / "adapter-state.json")["agent_models"]
     if event == "subagentStart":
@@ -539,7 +554,10 @@ def run_hook(event: str, payload: dict, plugin: Path = HOME) -> tuple[dict, int]
         if not isinstance(agent, str) or not agent:
             raise ValueError("subagentStart is missing its agent name")
         if agent.removeprefix("dev-team:") in declared_agents:
-            notes.append("DEV_TEAM_NATIVE_SUBAGENT_START\n" + runtime_context(plugin, agent))
+            notes.append(
+                "DEV_TEAM_NATIVE_SUBAGENT_START\n"
+                + runtime_context(plugin, agent, cwd=Path(payload["cwd"]))
+            )
     is_dispatch = event == "PreToolUse" and normalized["tool_name"] in {"Agent", "Task"}
     if is_dispatch:
         agent = normalized["tool_input"].get("subagent_type")
@@ -547,7 +565,7 @@ def run_hook(event: str, payload: dict, plugin: Path = HOME) -> tuple[dict, int]
             raise ValueError("Agent dispatch is missing its agent type")
         is_dispatch = agent.removeprefix("dev-team:") in declared_agents
         if is_dispatch:
-            notes.append(runtime_context(plugin, agent))
+            notes.append(runtime_context(plugin, agent, cwd=Path(payload["cwd"])))
     if event == "PreToolUse" and normalized["tool_name"] == "Bash":
         command = normalized["tool_input"].get("command", "")
         if not isinstance(command, str):

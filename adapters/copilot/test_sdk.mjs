@@ -60,19 +60,28 @@ try {
   writeFileSync(join(plugin, "agents", "runtime-probe.md"),
     "---\nname: runtime-probe\ndescription: Tests native runtime hook context\ntools: []\n---\n"
     + "Do not use tools. Reply only with the current runtime model mapping value for "
-    + "the probe-key alias and the DEV_TEAM_NATIVE_SUBAGENT_START marker from your "
+    + "the probe-key and user-key aliases and the DEV_TEAM_NATIVE_SUBAGENT_START marker from your "
     + "dev-team runtime hook context. If either is missing, reply MISSING.\n");
   const statePath = join(plugin, "adapter-state.json");
   const state = JSON.parse(readFileSync(statePath, "utf8"));
   state.agent_models["runtime-probe"] = "inherit";
   writeFileSync(statePath, JSON.stringify(state));
-  const config = join(temporary, "models.json");
+  const config = join(cwd, ".github", "copilot", "dev-team", "models.json");
+  mkdirSync(dirname(config), { recursive: true });
   writeFileSync(config, JSON.stringify({ models: { "probe-key": "RUNTIME_MAPPING_V1" } }));
   const environment = {
     ...process.env,
     COPILOT_HOME: join(temporary, "copilot-home"),
-    DEV_TEAM_COPILOT_CONFIG: config,
+    DEV_TEAM_COPILOT_CONFIG: "",
   };
+  const userConfig = join(environment.COPILOT_HOME, "dev-team", "models.json");
+  mkdirSync(dirname(userConfig), { recursive: true });
+  writeFileSync(userConfig, JSON.stringify({
+    models: {
+      "probe-key": "USER_MAPPING_SHOULD_BE_OVERRIDDEN",
+      "user-key": "INHERITED_USER_MAPPING",
+    },
+  }));
   if (account.host && account.login) {
     const selector = { host: account.host, login: account.login };
     mkdirSync(environment.COPILOT_HOME, { recursive: true });
@@ -151,6 +160,7 @@ try {
     + "Report the child's exact reply; do not infer a mapping from your own context.",
   );
   assert.match(dispatch?.data?.content || "", /RUNTIME_MAPPING_V2/);
+  assert.match(dispatch?.data?.content || "", /INHERITED_USER_MAPPING/);
   assert.match(dispatch?.data?.content || "", /DEV_TEAM_NATIVE_SUBAGENT_START/);
   const task = events.find((event) => event.type === "tool.execution_start"
     && event.data.toolName === "task"
@@ -161,8 +171,9 @@ try {
     && event.data.toolCallId === task.data.toolCallId && event.data.success);
   assert(result, JSON.stringify(events));
   assert.match(JSON.stringify(result), /RUNTIME_MAPPING_V2/);
+  assert.match(JSON.stringify(result), /INHERITED_USER_MAPPING/);
   assert.match(JSON.stringify(result), /DEV_TEAM_NATIVE_SUBAGENT_START/);
-  console.log("SDK native agent dispatch received edited runtime config without a rebuild");
+  console.log("SDK native agent dispatch received edited project mappings and inherited user defaults");
   events.length = 0;
 
   const guardResponse = await sendAndCollect(session,

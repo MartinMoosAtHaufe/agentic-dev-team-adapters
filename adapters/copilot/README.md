@@ -44,9 +44,13 @@ perform CLI marketplace auto-updates.
 
 ## Runtime model configuration
 
-Set mappings in `$COPILOT_HOME/dev-team/models.json`, or
+Set user defaults in `$COPILOT_HOME/dev-team/models.json`, or
 `~/.copilot/dev-team/models.json` when `COPILOT_HOME` is unset.
-`DEV_TEAM_COPILOT_CONFIG` can select another file. For example:
+Project mappings go in `.github/copilot/dev-team/models.json`.
+Project aliases override matching user aliases; other user mappings remain inherited.
+The adapter finds the nearest project file above the session working directory,
+including that directory, without searching beyond its Git repository boundary.
+Both files use this format:
 
 ```json
 {
@@ -60,13 +64,16 @@ Replace the example value with your chosen available Copilot model ID, and add m
 for the explicit source names you use. There are no built-in mappings.
 You may instead supply mappings explicitly in conversation context.
 
-The session-start, native dispatch and custom-subagent-start hooks read the file
+`DEV_TEAM_COPILOT_CONFIG` selects one authoritative file instead of merging user
+and project defaults. Relative paths resolve from the session working directory.
+
+The session-start, native dispatch and custom-subagent-start hooks read these files
 at runtime. Parent instructions require rereading file-based mappings before
 choosing a task model. No rebuild or restart is required. Existing agents retain
 the model already selected by Copilot.
 An absent default file supplies no mappings; a missing explicitly configured file
-or invalid configuration reports an error. Mapping errors deny affected task
-dispatches and appear as error context during startup.
+or invalid user or project configuration reports an error.
+Mapping errors deny affected task dispatches and appear as error context during startup.
 
 Original model declarations remain in agent frontmatter and are also exposed
 in runtime context. Instructions tell the parent to apply explicit user overrides
@@ -169,7 +176,8 @@ Copilot CLI on PATH; `COPILOT_CLI_PATH` can select its executable. Run
 `npm ci` in this directory if the SDK dependency is missing. The test registers
 a temporary local marketplace and installs into
 an isolated temporary `COPILOT_HOME` and makes real model requests. It tests
-original `.md` discovery and model preferences, relocated bootstrap, runtime configuration reload on native
-dispatch, native write blocking and skill-file loading. It does not validate VS Code UI
+original `.md` discovery and model preferences, relocated bootstrap, project mapping
+reload with inherited user defaults on native dispatch, native write blocking and skill-file loading.
+It does not validate VS Code UI
 integration or full end-to-end upstream workflow parity.
 CI runs the deterministic tests and SDK syntax checks, not authenticated model requests.

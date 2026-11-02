@@ -264,12 +264,115 @@ class AdapterTests(unittest.TestCase):
         with patch.dict(os.environ, {
             "DEV_TEAM_COPILOT_CONFIG": "", "COPILOT_HOME": str(self.root / "config"),
         }):
-            path, models = adapter.runtime_models()
-            self.assertEqual(self.root / "config" / "dev-team" / "models.json", path)
+            paths, models = adapter.runtime_models(self.root)
+            path = self.root / "config" / "dev-team" / "models.json"
+            self.assertEqual([path], paths)
             self.assertEqual({}, models)
             path.mkdir(parents=True)
             with self.assertRaises(OSError):
-                adapter.runtime_models()
+                adapter.runtime_models(self.root)
+
+    def test_project_mappings_overlay_user_defaults_and_reload_across_hooks(self) -> None:
+        workspace = self.root / "workspace"
+        nested = workspace / "src"
+        nested.mkdir(parents=True)
+        (workspace / ".git").mkdir()
+        user = self.root / "profile" / "dev-team" / "models.json"
+        project = workspace / ".github" / "copilot" / "dev-team" / "models.json"
+        user.parent.mkdir(parents=True)
+        project.parent.mkdir(parents=True)
+        adapter.write_json(user, {"models": {"haiku": "user-fast", "opus": "user-large"}})
+        adapter.write_json(project, {"models": {"haiku": "project-fast"}})
+        plugin = adapter.prepare_plugin()
+        with patch.dict(os.environ, {
+            "DEV_TEAM_COPILOT_CONFIG": "", "COPILOT_HOME": str(user.parent.parent),
+        }):
+            output, _ = adapter.run_hook("SessionStart", {"cwd": str(nested)}, plugin)
+            context = output["additionalContext"]
+            self.assertIn('"haiku": "project-fast"', context)
+            self.assertIn('"opus": "user-large"', context)
+            self.assertNotIn("user-fast", context)
+            self.assertIn(str(user), context)
+            self.assertIn(str(project), context)
+            adapter.write_json(project, {"models": {"haiku": "updated-project-fast"}})
+            output, _ = adapter.run_hook("PreToolUse", {
+                "cwd": str(nested), "toolName": "task",
+                "toolArgs": {"agent_type": "dev-team:reviewer", "prompt": "Review"},
+            }, plugin)
+            self.assertIn('"haiku": "updated-project-fast"', output["modifiedArgs"]["prompt"])
+            output, _ = adapter.run_hook("subagentStart", {
+                "cwd": str(nested), "agentName": "dev-team:reviewer",
+            }, plugin)
+            self.assertIn('"haiku": "updated-project-fast"', output["additionalContext"])
+            project.unlink()
+            self.assertEqual({"haiku": "user-fast", "opus": "user-large"},
+                             adapter.runtime_models(nested)[1])
+            user.unlink()
+            adapter.write_json(project, {"models": {"haiku": "project-only"}})
+            self.assertEqual({"haiku": "project-only"}, adapter.runtime_models(nested)[1])
+
+    def test_project_mapping_boundaries_and_explicit_configuration(self) -> None:
+        user = self.root / "profile" / "dev-team" / "models.json"
+        user.parent.mkdir(parents=True)
+        adapter.write_json(user, {"models": {"haiku": "user-fast"}})
+        (self.root / ".github" / "copilot" / "dev-team").mkdir(parents=True)
+        adapter.write_json(self.root / ".github" / "copilot" / "dev-team" / "models.json",
+                           {"models": {"haiku": "outside-project"}})
+        for kind in ["repository", "worktree"]:
+            with self.subTest(kind=kind):
+                workspace = self.root / kind
+                nested = workspace / "src"
+                nested.mkdir(parents=True)
+                marker = workspace / ".git"
+                if kind == "repository":
+                    marker.mkdir()
+                else:
+                    marker.write_text("gitdir: elsewhere", encoding="utf-8")
+                with patch.dict(os.environ, {
+                    "DEV_TEAM_COPILOT_CONFIG": "", "COPILOT_HOME": str(user.parent.parent),
+                }):
+                    self.assertEqual(([user], {"haiku": "user-fast"}),
+                                     adapter.runtime_models(nested))
+                project = workspace / ".github" / "copilot" / "dev-team" / "models.json"
+                project.parent.mkdir(parents=True)
+                adapter.write_json(project, {"models": None})
+                self.assertEqual(([self.mapping], {"haiku": "chosen-model"}),
+                                 adapter.runtime_models(nested))
+        with patch.dict(os.environ, {"DEV_TEAM_COPILOT_CONFIG": "user-models.json"}):
+            self.assertEqual(([self.mapping], {"haiku": "chosen-model"}),
+                             adapter.runtime_models(self.root))
+
+    def test_invalid_project_mapping_reports_errors_and_denies_dispatch(self) -> None:
+        workspace = self.root / "workspace"
+        workspace.mkdir()
+        (workspace / ".git").mkdir()
+        project = workspace / ".github" / "copilot" / "dev-team" / "models.json"
+        project.parent.mkdir(parents=True)
+        adapter.write_json(project, {"models": {"haiku": ""}})
+        plugin = adapter.prepare_plugin()
+        environment = {
+            **os.environ, "DEV_TEAM_COPILOT_CONFIG": "",
+            "COPILOT_HOME": str(self.root / "profile"),
+        }
+        for event, extra in [
+            ("SessionStart", {}),
+            ("PreToolUse", {"toolName": "task", "toolArgs": {
+                "agent_type": "dev-team:reviewer", "prompt": "Review",
+            }}),
+        ]:
+            with self.subTest(event=event):
+                result = subprocess.run(
+                    [sys.executable, str(plugin / "_copilot_adapter.py"), "hook", event],
+                    input=json.dumps({"cwd": str(workspace), **extra}), env=environment,
+                    text=True, capture_output=True, check=True,
+                )
+                output = json.loads(result.stdout)
+                if event == "SessionStart":
+                    self.assertIn("DEV_TEAM_RUNTIME_ERROR", output["additionalContext"])
+                else:
+                    self.assertEqual("deny", output["permissionDecision"])
+                self.assertIn(str(project), result.stderr)
+                self.assertIn("models must map", result.stderr)
 
     def test_native_dispatch_receives_fresh_context_and_preserves_overrides(self) -> None:
         (self.source / "agents" / "worker.md").write_text(
