@@ -30,6 +30,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parent))
 import report
 import runner
 import scheduler
+
 from adapters import bootstrap, bugsjs_adapter, defects4j_adapter, recorded_diff_adapter
 
 DEFAULT_RESULTS_DIR = Path(__file__).resolve().parent / "results"
