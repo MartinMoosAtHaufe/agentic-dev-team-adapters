@@ -617,26 +617,30 @@ class AdapterTests(unittest.TestCase):
     def test_real_shell_hook_runs_for_valid_powershell_here_strings(self) -> None:
         self.use_upstream_hook("PreToolUse", "Bash", "destructive_guard.py")
         plugin = adapter.prepare_plugin()
-        for quote, newline in [("'", "\n"), ('"', "\r\n")]:
-            with self.subTest(quote=quote, newline=newline):
-                other = '"' if quote == "'" else "'"
-                command = (
-                    f"$text = @{quote}{newline}"
-                    f"An unmatched {other} quote; git reset --hard{newline}"
-                    f"{quote}@{newline}Write-Output $text"
-                )
-                output, _ = adapter.run_hook("PreToolUse", {
-                    "cwd": str(self.root), "toolName": "powershell",
-                    "toolArgs": {"command": command},
-                }, plugin)
-                self.assertNotIn("permissionDecision", output)
-                self.assertIn("CAUTION", output.get("additionalContext", ""))
-                output, _ = adapter.run_hook("PreToolUse", {
-                    "cwd": str(self.root), "toolName": "powershell",
-                    "toolArgs": {"command": command + "\n& claude -p 'Do work'"},
-                }, plugin)
-                self.assertEqual("deny", output["permissionDecision"])
-                self.assertIn("Claude subprocess workflow", output["permissionDecisionReason"])
+        for tool_key, input_key in [("toolName", "toolArgs"), ("tool_name", "tool_input")]:
+            for tool in ["powershell", "bash", "Bash"]:
+                for quote, newline in [("'", "\n"), ('"', "\r\n")]:
+                    with self.subTest(tool=tool, tool_key=tool_key, quote=quote):
+                        other = '"' if quote == "'" else "'"
+                        command = (
+                            f"$text = @{quote}{newline}"
+                            f"An unmatched {other} quote; git reset --hard{newline}"
+                            f"{quote}@{newline}Write-Output $text"
+                        )
+                        output, _ = adapter.run_hook("PreToolUse", {
+                            "cwd": str(self.root), tool_key: tool,
+                            input_key: {"command": command},
+                        }, plugin)
+                        self.assertNotIn("permissionDecision", output)
+                        self.assertIn("CAUTION", output.get("additionalContext", ""))
+                        output, _ = adapter.run_hook("PreToolUse", {
+                            "cwd": str(self.root), tool_key: tool,
+                            input_key: {"command": command + "\n& claude -p 'Do work'"},
+                        }, plugin)
+                        self.assertEqual("deny", output["permissionDecision"])
+                        self.assertIn(
+                            "Claude subprocess workflow", output["permissionDecisionReason"],
+                        )
 
     def test_denial_and_stop_block_cannot_be_overwritten(self) -> None:
         hooks = adapter.read_json(self.source / "hooks" / "hooks.json")
