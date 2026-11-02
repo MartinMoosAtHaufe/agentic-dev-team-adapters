@@ -1,0 +1,22 @@
+{
+  "name": "dev-team-copilot",
+  "owner": {
+    "name": "MartinMoosAtHaufe"
+  },
+  "metadata": {
+    "description": "Copilot adaptation of the upstream dev-team plugin"
+  },
+  "plugins": [
+    {
+      "name": "dev-team",
+      "description": "Upstream dev-team agents and skills with Copilot-native runtime hooks.",
+      "license": "MIT",
+      "source": {
+        "source": "github",
+        "repo": "MartinMoosAtHaufe/agentic-dev-team-adapters",
+        "ref": "copilot",
+        "path": "plugins/dev-team"
+      }
+    }
+  ]
+}
