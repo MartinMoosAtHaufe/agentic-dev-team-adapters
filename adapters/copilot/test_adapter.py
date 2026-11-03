@@ -12,8 +12,100 @@ import unittest
 from pathlib import Path
 from unittest.mock import patch
 
+import agent_profiles as profiles
 import build_marketplace as marketplace
 import dev_team_copilot as adapter
+
+
+class ProfileTests(unittest.TestCase):
+    def compile(self, declaration: str) -> tuple[bytes, list[str]]:
+        return profiles.compile_profile(
+            f"---\nname: probe\n{declaration}\nmodel: inherit\n---\nBody\n".encode(), "probe.md",
+        )
+
+    def test_scalar_and_list_grants_are_native_and_deduplicated(self) -> None:
+        for declaration in (
+            "tools: Read, Grep, Glob, Read",
+            'tools: "Read, Grep, Glob, Read"',
+            "tools: ['Read', Grep, Glob, Read]",
+            "tools:\n  - Read\n  - Grep\n  - Glob\n  - Read",
+            "tools:\n  - Read\n# search tools\n  - Grep\n  - Glob",
+            "tools: [\n  Read,\n  Grep,\n  Glob\n]",
+        ):
+            with self.subTest(declaration=declaration):
+                result, warnings = self.compile(declaration)
+                self.assertIn(b'tools: ["view", "grep", "rg", "glob"]\n', result)
+                self.assertEqual([], warnings)
+
+    def test_native_grants_preserve_capability_boundaries(self) -> None:
+        result, warnings = self.compile(
+            "tools: Write, Edit, Bash, Agent, Task, Skill, WebFetch, WebSearch, "
+            "AskUserQuestion, mcp__codegraph__*, mcp__repowise__get_context"
+        )
+        declaration = result.decode().split("tools: ", 1)[1].splitlines()[0]
+        self.assertEqual([
+            "create", "edit", "bash", "read_bash", "stop_bash", "list_bash",
+            "powershell", "read_powershell", "stop_powershell", "list_powershell",
+            "task", "skill", "web_fetch", "web_search", "ask_user",
+            "codegraph/*", "repowise/get_context", "apply_patch",
+        ], json.loads(declaration))
+        self.assertEqual([], warnings)
+
+    def test_patch_access_requires_both_edit_and_write(self) -> None:
+        for source, native in (("Write", "create"), ("Edit", "edit")):
+            with self.subTest(source=source):
+                result, warnings = self.compile(f"tools: {source}")
+                self.assertIn(f'tools: ["{native}"]\n'.encode(), result)
+                self.assertNotIn(b"apply_patch", result)
+                self.assertIn("probe.md: apply_patch disabled", warnings[0])
+
+    def test_empty_and_omitted_grants_remain_distinct(self) -> None:
+        result, warnings = self.compile("tools: []")
+        self.assertIn(b"tools: []\n", result)
+        self.assertEqual([], warnings)
+        source = b"---\nname: probe\n---\nBody\n"
+        self.assertEqual((source, []), profiles.compile_profile(source, "probe.md"))
+
+    def test_scoped_shell_is_disabled_without_broadening(self) -> None:
+        result, warnings = self.compile("tools: Read, Bash(graphify *)")
+        self.assertIn(b'tools: ["view"]\n', result)
+        self.assertIn("probe.md: disabled command-scoped shell grant 'Bash(graphify *)'", warnings[0])
+        result, warnings = self.compile("tools: Bash, Bash(npx playwright *)")
+        self.assertIn(b'"powershell"', result)
+        self.assertEqual([], warnings)
+
+    def test_mcp_tool_names_keep_embedded_delimiters(self) -> None:
+        result, warnings = self.compile("tools: mcp__adapter__tool__detail")
+        self.assertIn(b'tools: ["adapter/tool__detail"]', result)
+        self.assertEqual([], warnings)
+
+    def test_unknown_and_malformed_declarations_identify_the_agent(self) -> None:
+        for declaration in (
+            "tools: Invented", "tools:", "tools: null", 'tools: ""', "tools: true",
+            "tools: 7", "tools: {}", "tools: [[Read]]", "tools: [Read, false]",
+            "tools: Read\n tools: Write", "tools: Read\ntools: Write",
+            "tools: mcp__server__", "tools: mcp____read", "tools: [Read",
+        ):
+            with (
+                self.subTest(declaration=declaration),
+                self.assertRaisesRegex(ValueError, "probe.md: .*tool"),
+            ):
+                self.compile(declaration)
+
+    def test_profile_bytes_outside_the_declaration_are_preserved(self) -> None:
+        for newline in (b"\n", b"\r\n"):
+            with self.subTest(newline=newline):
+                source = newline.join([
+                    b"---", b"", b'name: "probe"', b"tools: Read, Grep # source grants",
+                    b"# keep this comment", b"", b"model: 'haiku' # preferred",
+                    b"---", b"Body with tools: Read unchanged.", b"",
+                ])
+                result, _ = profiles.compile_profile(source, "probe.md")
+                self.assertEqual(
+                    source.replace(
+                        b"tools: Read, Grep # source grants", b'tools: ["view", "grep", "rg"]', 1,
+                    ), result,
+                )
 
 
 class AdapterTests(unittest.TestCase):
@@ -90,12 +182,18 @@ class AdapterTests(unittest.TestCase):
         plugin = adapter.prepare_plugin(self.source)
         self.assertEqual(
             (plugin / "agents" / "reviewer.md").read_bytes(),
-            original[self.source / "agents" / "reviewer.md"],
+            original[self.source / "agents" / "reviewer.md"].replace(
+                b"tools: Read, Agent, Bash(git:*)", b'tools: ["view", "task"]',
+            ),
         )
         self.assertEqual(
-            {path.name for path in (self.source / "agents").iterdir()},
+            {"reviewer.md"},
             {path.name for path in (plugin / "agents").iterdir()},
         )
+        self.assertTrue(any(
+            "reviewer.md: disabled command-scoped shell grant" in warning
+            for warning in adapter.read_json(plugin / "adapter-state.json")["limitations"]
+        ))
         self.assertEqual("haiku", adapter.read_json(plugin / "adapter-state.json")["agent_models"]["reviewer"])
         for path, content in original.items():
             self.assertEqual(path.read_bytes(), content)
@@ -130,6 +228,47 @@ class AdapterTests(unittest.TestCase):
         self.assertNotIn("chosen-model-v1", context["additionalContext"])
         self.assertEqual(original, (self.source / "agents" / "reviewer.md").read_bytes())
 
+    def test_changed_grants_refresh_and_invalid_refresh_never_returns_stale_output(self) -> None:
+        agent = self.source / "agents" / "reviewer.md"
+        broad = adapter.prepare_plugin(self.source)
+        agent.write_bytes(agent.read_bytes().replace(b"Read, Agent", b"Read"))
+        narrow = adapter.prepare_plugin(self.source)
+        self.assertNotEqual(broad, narrow)
+        self.assertIn(b'tools: ["view"]', (narrow / "agents" / "reviewer.md").read_bytes())
+        self.assertNotIn(b'"task"', (narrow / "agents" / "reviewer.md").read_bytes())
+        snapshots = set((self.root / "generated").iterdir())
+        agent.write_bytes(agent.read_bytes().replace(b"tools: Read", b"tools: Unknown"))
+        source = agent.read_bytes()
+        with self.assertRaisesRegex(ValueError, "reviewer.md: .*Unknown"):
+            adapter.prepare_plugin(self.source)
+        self.assertEqual(source, agent.read_bytes())
+        self.assertEqual(
+            snapshots,
+            {path for path in (self.root / "generated").iterdir() if (path / "dev-team").exists()},
+        )
+
+    def test_projected_review_registry_preserves_filename_consumers(self) -> None:
+        agent = self.source / "agents" / "reviewer.md"
+        agent.rename(agent.with_name("permissions-review.md"))
+        library = self.source / "hooks" / "lib"
+        library.mkdir()
+        shutil.copyfile(
+            marketplace.REPOSITORY / "plugins" / "dev-team" / "hooks" / "lib"
+            / "review_agent_registry.py",
+            library / "review_agent_registry.py",
+        )
+        plugin = adapter.prepare_plugin(self.source)
+        relocated = self.root / "relocated"
+        shutil.copytree(plugin, relocated)
+        subprocess.run(
+            [sys.executable, "-c",
+             ("import sys; sys.path.insert(0, sys.argv[1]); "
+             "from review_agent_registry import default_agents_dir, registered_review_agent_names; "
+             "assert registered_review_agent_names(default_agents_dir()) == {'permissions-review'}"),
+             str(relocated / "hooks" / "lib")],
+            check=True, capture_output=True, text=True,
+        )
+
     def test_default_build_uses_the_same_checkout_without_local_configuration(self) -> None:
         checkout = self.root / "checkout"
         home = checkout / "adapters" / "copilot"
@@ -138,7 +277,9 @@ class AdapterTests(unittest.TestCase):
         with patch.object(adapter, "HOME", home):
             plugin = adapter.prepare_plugin()
         self.assertEqual(
-            (self.source / "agents" / "reviewer.md").read_bytes(),
+            (self.source / "agents" / "reviewer.md").read_bytes().replace(
+                b"tools: Read, Agent", b'tools: ["view", "task"]',
+            ),
             (plugin / "agents" / "reviewer.md").read_bytes(),
         )
 
@@ -159,7 +300,9 @@ class AdapterTests(unittest.TestCase):
         )
         self.assertEqual(entry["version"], adapter.read_json(plugin / "plugin.json")["version"])
         self.assertEqual(
-            (self.source / "agents" / "reviewer.md").read_bytes(),
+            (self.source / "agents" / "reviewer.md").read_bytes().replace(
+                b"tools: Read, Agent", b'tools: ["view", "task"]',
+            ),
             (plugin / "agents" / "reviewer.md").read_bytes(),
         )
         self.assertEqual(
@@ -196,7 +339,11 @@ class AdapterTests(unittest.TestCase):
             ["git", "--git-dir", str(remote), "show", "copilot:plugins/dev-team/agents/reviewer.md"],
             capture_output=True, check=True,
         ).stdout
-        self.assertEqual((self.source / "agents" / "reviewer.md").read_bytes(), published)
+        self.assertEqual(
+            (self.source / "agents" / "reviewer.md").read_bytes().replace(
+                b"tools: Read, Agent", b'tools: ["view", "task"]',
+            ), published,
+        )
         self.assertEqual(first, marketplace.publish_marketplace(repository, output))
         adapter.write_json(output / "marketplace.json", {
             **adapter.read_json(output / "marketplace.json"),
@@ -220,7 +367,10 @@ class AdapterTests(unittest.TestCase):
             encoding="utf-8",
         )
         plugin = adapter.prepare_plugin(self.source)
-        self.assertEqual(agent.read_bytes(), (plugin / "agents" / "reviewer.md").read_bytes())
+        self.assertEqual(
+            agent.read_bytes().replace(b"tools: Read, Agent", b'tools: ["view", "task"]'),
+            (plugin / "agents" / "reviewer.md").read_bytes(),
+        )
         context = adapter.runtime_context(plugin)
         self.assertIn("future-upstream-model", context)
         self.assertIn("stop and ask the user", context)
@@ -234,7 +384,8 @@ class AdapterTests(unittest.TestCase):
                 agent.write_text(original.replace("model: haiku", declaration), encoding="utf-8")
                 plugin = adapter.prepare_plugin(self.source)
                 self.assertEqual(
-                    agent.read_bytes(), (plugin / "agents" / "reviewer.md").read_bytes(),
+                    agent.read_bytes().replace(b"tools: Read, Agent", b'tools: ["view", "task"]'),
+                    (plugin / "agents" / "reviewer.md").read_bytes(),
                 )
                 intent = adapter.read_json(plugin / "adapter-state.json")["agent_models"]["reviewer"]
                 self.assertEqual("inherit" if declaration else None, intent)

@@ -90,10 +90,12 @@ cannot change an already chosen model.
 
 ## Native workflows and hooks
 
-Agents, skills, knowledge and scripts are copied verbatim. Agent filenames,
-frontmatter, tool declarations and bodies stay unchanged; no `.agent.md`
-variants are generated. Copilot loads the original `.md` agents and interprets
-their frontmatter. Runtime context supplies plugin-relative paths, upstream
+Upstream sources, skills, knowledge and scripts remain unchanged. The adapter
+retains the original `.md` profile filenames and translates their tool
+declarations to native tool names. Agent bodies, model declarations and unrelated
+metadata stay unchanged. Dispatch IDs such as `dev-team:correctness-review` and
+model-map keys stay unchanged. Retaining filenames also preserves upstream hook
+lookups without adapting their scripts. Runtime context supplies plugin-relative paths, upstream
 policies, model intent, skill-loading instructions and Copilot-native workflow
 overrides. Child agents receive the model-intent table too, for nested delegation.
 
@@ -125,9 +127,20 @@ upstream standalone headless loop is not ported.
 
 Patch destination checks do not simulate Claude Edit content arguments for
 content-version checks. Claude permissions are not imported; Copilot controls
-permissions. Agent tool declarations are left to Copilot, not translated or
-broadened by this adapter; discovery alone does not establish equivalent tool
-restrictions or effective model selection.
+permissions. Generated tool grants preserve source restrictions with the
+Edit-only compatibility exception below.
+Command-scoped shell grants without an unrestricted shell grant are disabled,
+with an agent-specific warning and package limitation. Unknown or malformed
+declarations stop generation. Patch access requires both `Edit` and `Write`;
+single-capability profiles retain their corresponding native file tool.
+Copilot expands `edit` to include file creation; this explicit compatibility
+exception is reported as a package limitation. It does not grant shell access.
+Omitted tool declarations inherit host defaults; `tools: []` declares no tools.
+When skills are enabled, the tested host injects `skill` even for an empty
+declaration. The adapter does not override this host behavior.
+MCP grants retain their server and tool specificity; the host must configure
+those servers. Discovery alone does not establish effective runtime permissions
+or model selection.
 See generated `adapter-state.json` for the package's limitations.
 Do not install both the original and the projection into the same session.
 
@@ -173,7 +186,8 @@ git --no-pager diff --check
 npm --prefix adapters\copilot run test:sdk
 ```
 
-Unit tests exercise byte-for-byte agent preservation, real hook subprocesses,
+Unit tests exercise source and unrelated profile-byte preservation, native grants,
+original filenames and review-registry discovery, scoped-shell warnings, real hook subprocesses,
 runtime mapping reloads, inherited intent, dispatch overrides, relocation, guards
 and incompatible upstream changes.
 The SDK test requires the existing development dependency and an authenticated
@@ -181,8 +195,13 @@ Copilot CLI on PATH; `COPILOT_CLI_PATH` can select its executable. Run
 `npm ci` in this directory if the SDK dependency is missing. The test registers
 a temporary local marketplace and installs into
 an isolated temporary `COPILOT_HOME` and makes real model requests. It tests
-original `.md` discovery and model preferences, relocated bootstrap, project mapping
+generated `.md` profile discovery and model preferences, relocated bootstrap, project mapping
 reload with inherited user defaults on native dispatch, native write blocking and skill-file loading.
-It does not validate VS Code UI
-integration or full end-to-end upstream workflow parity.
+It also checks host-resolved profile tools, shell execution, MCP grant specificity,
+and actual child search/read events. A host-permission negative control removes
+the read grants and confirms that the permission assertion fails.
+The host tool inventory is obtained by selecting each generated profile, not
+directly from the child. Raw aliases are tested separately: Read/Grep work on the
+tested host, but Bash does not grant Windows PowerShell.
+It does not validate VS Code UI integration or full end-to-end upstream workflow parity.
 CI runs the deterministic tests and SDK syntax checks, not authenticated model requests.
