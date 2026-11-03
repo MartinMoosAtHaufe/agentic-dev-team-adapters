@@ -48,7 +48,7 @@ Specification: `docs\specs\copilot-agent-tool-declarations\spec.md`.
 ### Slice 1: Generate and verify usable Copilot agent profiles
 
 **Depends-on:** none
-**Files:** `adapters\copilot\agent_profiles.py`, `adapters\copilot\dev_team_copilot.py`, `adapters\copilot\test_adapter.py`, `adapters\copilot\test_sdk.mjs`, `adapters\copilot\README.md`
+**Files:** `adapters/copilot/agent_profiles.py`, `adapters/copilot/dev_team_copilot.py`, `adapters/copilot/test_adapter.py`, `adapters/copilot/test_sdk.mjs`, `adapters/copilot/README.md`, `docs/specs/copilot-agent-tool-declarations/spec.md`, `.claude/metrics/config-changelog.jsonl`
 
 **Behavior:**
 
