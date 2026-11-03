@@ -1,7 +1,7 @@
 ---
 name: mutation-kill
 description: Autonomous mutation survivor-reduction loop — runs a scoped mutation tool, generates targeted tests for survivors in priority order, verifies they compile and pass, commits, and repeats until survivors stop decreasing. Gates on hard kills only (timeouts excluded). Complements the advisory /mutation-testing skill.
-tools: Read, Grep, Glob, Edit, Write, Bash, Skill, mcp__codegraph__*, mcp__plugin_repowise_repowise__get_context, mcp__plugin_repowise_repowise__get_symbol, mcp__plugin_repowise_repowise__search_codebase, mcp__plugin_repowise_repowise__get_risk
+tools: ["view", "grep", "rg", "glob", "edit", "create", "bash", "read_bash", "stop_bash", "list_bash", "powershell", "read_powershell", "stop_powershell", "list_powershell", "skill", "codegraph/*", "plugin_repowise_repowise/get_context", "plugin_repowise_repowise/get_symbol", "plugin_repowise_repowise/search_codebase", "plugin_repowise_repowise/get_risk", "apply_patch"]
 model: opus
 effort: high
 color: yellow

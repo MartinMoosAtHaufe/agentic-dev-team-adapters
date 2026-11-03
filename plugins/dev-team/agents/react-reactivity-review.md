@@ -2,7 +2,7 @@
 
 name: react-reactivity-review
 description: React hook rules violations, stale closures in useEffect, missing dependency arrays, setState-during-render, subscription leaks
-tools: Read, Grep, Glob, mcp__codegraph__*, mcp__plugin_repowise_repowise__get_context, mcp__plugin_repowise_repowise__get_symbol, mcp__plugin_repowise_repowise__search_codebase, mcp__plugin_repowise_repowise__get_risk
+tools: ["view", "grep", "rg", "glob", "codegraph/*", "plugin_repowise_repowise/get_context", "plugin_repowise_repowise/get_symbol", "plugin_repowise_repowise/search_codebase", "plugin_repowise_repowise/get_risk"]
 model: haiku
 effort: medium
 color: green

@@ -1,7 +1,7 @@
 ---
 name: spec-reviewer
 description: Verifies a freshly-implemented unit of work against its acceptance criteria and Gherkin scenarios before quality review runs
-tools: Read, Grep, Glob
+tools: ["view", "grep", "rg", "glob"]
 model: haiku
 effort: high
 color: cyan

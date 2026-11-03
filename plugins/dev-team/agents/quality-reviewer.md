@@ -1,7 +1,7 @@
 ---
 name: quality-reviewer
 description: Coordinates code quality review agents and drives the fix loop for a freshly-implemented unit of work
-tools: Read, Grep, Glob, Edit, Bash, Agent, Skill
+tools: ["view", "grep", "rg", "glob", "edit", "bash", "read_bash", "stop_bash", "list_bash", "powershell", "read_powershell", "stop_powershell", "list_powershell", "task", "skill"]
 model: sonnet
 effort: high
 color: purple

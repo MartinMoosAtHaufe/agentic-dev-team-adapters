@@ -1,7 +1,7 @@
 ---
 name: data-flow-tracer
 description: Traces a use case through all architecture layers, mapping data access patterns, caching, external integrations, and identifying gaps. Read-only analysis agent — it never edits code; its one execution grant is a scoped Bash(graphify *) for running the Graphify CLI's read-only query commands.
-tools: Read, Grep, Glob, mcp__codegraph__*, mcp__plugin_repowise_repowise__get_context, mcp__plugin_repowise_repowise__get_symbol, mcp__plugin_repowise_repowise__search_codebase, mcp__plugin_repowise_repowise__get_risk, Bash(graphify *)
+tools: ["view", "grep", "rg", "glob", "codegraph/*", "plugin_repowise_repowise/get_context", "plugin_repowise_repowise/get_symbol", "plugin_repowise_repowise/search_codebase", "plugin_repowise_repowise/get_risk"]
 model: sonnet
 effort: high
 color: cyan

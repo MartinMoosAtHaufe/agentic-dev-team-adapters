@@ -2,7 +2,7 @@
 
 name: performance-review
 description: Resource leaks, N+1 queries, unbounded growth, timeouts, algorithmic issues
-tools: Read, Grep, Glob, mcp__codegraph__*, mcp__plugin_repowise_repowise__get_context, mcp__plugin_repowise_repowise__get_symbol, mcp__plugin_repowise_repowise__search_codebase, mcp__plugin_repowise_repowise__get_health
+tools: ["view", "grep", "rg", "glob", "codegraph/*", "plugin_repowise_repowise/get_context", "plugin_repowise_repowise/get_symbol", "plugin_repowise_repowise/search_codebase", "plugin_repowise_repowise/get_health"]
 model: haiku
 effort: high
 color: green

@@ -2,7 +2,7 @@
 
 name: domain-review
 description: Domain boundaries, abstraction leaks, business logic placement
-tools: Read, Grep, Glob, Skill, mcp__codegraph__*, mcp__plugin_repowise_repowise__get_context, mcp__plugin_repowise_repowise__get_symbol, mcp__plugin_repowise_repowise__search_codebase, mcp__plugin_repowise_repowise__get_risk
+tools: ["view", "grep", "rg", "glob", "skill", "codegraph/*", "plugin_repowise_repowise/get_context", "plugin_repowise_repowise/get_symbol", "plugin_repowise_repowise/search_codebase", "plugin_repowise_repowise/get_risk"]
 model: opus
 effort: high
 color: green

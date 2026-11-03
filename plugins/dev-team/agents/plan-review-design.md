@@ -1,7 +1,7 @@
 ---
 name: plan-review-design
 description: Adversarially critiques an implementation plan's technical design — coupling, abstraction boundaries, structural risks, and pattern adherence — before the human plan-review gate
-tools: Read, Grep, Glob
+tools: ["view", "grep", "rg", "glob"]
 model: sonnet
 effort: high
 color: green

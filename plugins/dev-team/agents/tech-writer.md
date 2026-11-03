@@ -1,7 +1,7 @@
 ---
 name: tech-writer
 description: Project documentation, terminology consistency, and ubiquitous language enforcement
-tools: Read, Grep, Glob, Edit, Write, Skill
+tools: ["view", "grep", "rg", "glob", "edit", "create", "skill", "apply_patch"]
 model: sonnet
 effort: high
 color: yellow

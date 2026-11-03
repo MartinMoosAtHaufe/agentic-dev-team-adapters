@@ -1,7 +1,7 @@
 ---
 name: session-analysis
 description: Map an aggregated session digest to probable plugin causes and ranked, tagged improvement suggestions
-tools: Read
+tools: ["view"]
 model: sonnet
 effort: high
 color: cyan

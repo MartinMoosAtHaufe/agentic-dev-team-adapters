@@ -2,7 +2,7 @@
 
 name: claude-setup-review
 description: CLAUDE.md completeness, rules, skills, path accuracy, and agent frontmatter schema compliance
-tools: Read, Grep, Glob
+tools: ["view", "grep", "rg", "glob"]
 model: haiku
 effort: high
 color: green

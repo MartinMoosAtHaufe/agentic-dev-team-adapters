@@ -2,7 +2,7 @@
 
 name: token-efficiency-review
 description: Token usage optimization, file length, CLAUDE.md size, LLM anti-patterns
-tools: Read, Grep, Glob
+tools: ["view", "grep", "rg", "glob"]
 model: haiku
 effort: high
 color: green

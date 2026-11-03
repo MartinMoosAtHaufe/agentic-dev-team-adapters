@@ -1,7 +1,7 @@
 ---
 name: plan-review-parallelization
 description: Verifies that an implementation plan's declared same-wave concurrency is real — no file collisions, no disjoint-file behavioral coupling, no residual graph mis-layering — before the human plan-review gate
-tools: Read, Grep, Glob
+tools: ["view", "grep", "rg", "glob"]
 model: sonnet
 effort: high
 color: green

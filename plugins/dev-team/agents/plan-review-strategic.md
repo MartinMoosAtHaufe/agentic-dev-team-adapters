@@ -1,7 +1,7 @@
 ---
 name: plan-review-strategic
 description: Adversarially critiques an implementation plan's problem-solution fit, scope, risk, and opportunity cost before the human plan-review gate
-tools: Read, Grep, Glob
+tools: ["view", "grep", "rg", "glob"]
 model: sonnet
 effort: high
 color: green

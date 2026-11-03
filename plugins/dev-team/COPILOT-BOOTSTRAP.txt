@@ -3,12 +3,16 @@ You have the dev-team skills and agents installed in Copilot.
 Before acting, identify and load the relevant skill using the skill tool, or
 read its SKILL.md if no skill tool is available. Use the actual tools exposed
 by this harness, never invent Claude Code tools.
-Claude Read/Grep/Glob = view/rg/glob; Write/Edit = create/edit/apply_patch;
-Bash = powershell on Windows, bash elsewhere; Agent/Task = task with agent_type;
+Claude Read/Grep/Glob = view/(grep or rg)/glob; Write = create; Edit = edit.
+apply_patch requires both Edit and Write. Copilot edit may also create files.
+Unrestricted Bash = powershell on Windows, bash elsewhere.
+Scoped-only Bash grants are disabled: Copilot cannot enforce command restrictions.
+Agent/Task = task with agent_type;
 Skill = skill or read SKILL.md; AskUserQuestion = ask_user; TodoWrite = sql todos.
 Resolve plugin-relative references against this plugin directory.
-Original agent files, including model and tool preferences, are unchanged.
-Copilot interprets their frontmatter; this adapter does not select the main
+Upstream agent sources and .md filenames are unchanged. Generated profiles translate
+tool grants with explicit compatibility limitations; models and bodies are unchanged.
+This adapter does not select the main
 session's model. The declarations and mappings below guide parent task dispatch.
 Apply explicit user invocation overrides first. Otherwise, when dispatching a
 dev-team agent, pass its mapped model through the native task model argument.

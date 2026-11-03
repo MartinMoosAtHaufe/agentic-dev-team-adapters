@@ -12,7 +12,7 @@
       "description": "Upstream dev-team agents and skills with Copilot-native runtime hooks.",
       "license": "MIT",
       "source": "./plugins/dev-team",
-      "version": "14.0.1-copilot.6"
+      "version": "14.0.1-copilot.8"
     }
   ]
 }

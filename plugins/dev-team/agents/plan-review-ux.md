@@ -1,7 +1,7 @@
 ---
 name: plan-review-ux
 description: Adversarially critiques an implementation plan's usability, accessibility, and error experience before the human plan-review gate; self-skips for plans with no user-facing surface
-tools: Read, Grep, Glob
+tools: ["view", "grep", "rg", "glob"]
 model: sonnet
 effort: high
 color: green

@@ -1,7 +1,7 @@
 ---
 name: autoship-batch-proposer
 description: Propose issue-number groupings among currently-ungrouped autoship candidates from their titles and bodies
-tools: Read
+tools: ["view"]
 model: haiku
 effort: low
 color: cyan

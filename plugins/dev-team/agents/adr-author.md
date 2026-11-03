@@ -1,7 +1,7 @@
 ---
 name: adr-author
 description: Creates and manages Architecture Decision Records (ADRs) with a decision framework for when to create one
-tools: Read, Write, Glob, Grep, Bash, Skill, mcp__codegraph__*, mcp__plugin_repowise_repowise__get_context, mcp__plugin_repowise_repowise__get_symbol, mcp__plugin_repowise_repowise__search_codebase, mcp__plugin_repowise_repowise__get_risk, mcp__plugin_repowise_repowise__get_why
+tools: ["view", "create", "glob", "grep", "rg", "bash", "read_bash", "stop_bash", "list_bash", "powershell", "read_powershell", "stop_powershell", "list_powershell", "skill", "codegraph/*", "plugin_repowise_repowise/get_context", "plugin_repowise_repowise/get_symbol", "plugin_repowise_repowise/search_codebase", "plugin_repowise_repowise/get_risk", "plugin_repowise_repowise/get_why"]
 model: sonnet
 effort: high
 color: yellow
