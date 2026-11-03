@@ -54,12 +54,16 @@ You have the dev-team skills and agents installed in Copilot.
 Before acting, identify and load the relevant skill using the skill tool, or
 read its SKILL.md if no skill tool is available. Use the actual tools exposed
 by this harness, never invent Claude Code tools.
-Claude Read/Grep/Glob = view/rg/glob; Write/Edit = create/edit/apply_patch;
-Bash = powershell on Windows, bash elsewhere; Agent/Task = task with agent_type;
+Claude Read/Grep/Glob = view/(grep or rg)/glob; Write = create; Edit = edit.
+apply_patch requires both Edit and Write. Copilot edit may also create files.
+Unrestricted Bash = powershell on Windows, bash elsewhere.
+Scoped-only Bash grants are disabled: Copilot cannot enforce command restrictions.
+Agent/Task = task with agent_type;
 Skill = skill or read SKILL.md; AskUserQuestion = ask_user; TodoWrite = sql todos.
 Resolve plugin-relative references against this plugin directory.
-Original agent files, including model and tool preferences, are unchanged.
-Copilot interprets their frontmatter; this adapter does not select the main
+Upstream agent sources and .md filenames are unchanged. Generated profiles translate
+tool grants with explicit compatibility limitations; models and bodies are unchanged.
+This adapter does not select the main
 session's model. The declarations and mappings below guide parent task dispatch.
 Apply explicit user invocation overrides first. Otherwise, when dispatching a
 dev-team agent, pass its mapped model through the native task model argument.
@@ -153,7 +157,7 @@ def agent_model(text: str) -> str | None:
     match = re.match(r"\A---\r?\n(.*?)\r?\n---", text, re.DOTALL)
     if not match:
         raise ValueError("Agent is missing YAML frontmatter")
-    declarations = re.findall(r"(?m)^model:[ \t]*([^\r\n]*)$", match[1])
+    declarations = re.findall(r"(?m)^model:[ \t]*([^\r\n]*)\r?$", match[1])
     if len(declarations) > 1:
         raise ValueError("Agent declares multiple model fields")
     if not declarations:
@@ -336,6 +340,8 @@ def runtime_context(plugin: Path, agent: str | None = None, cwd: Path | None = N
 
 def prepare_plugin(source: Path | str | None = None) -> Path:
     """Refresh on content changes; return the absolute SDK plugin directory."""
+    from agent_profiles import PARSER_PATH, compile_profile
+
     config_path = HOME / "local.json"
     config = read_json(config_path) if config_path.is_file() else {}
     if source is None:
@@ -350,6 +356,8 @@ def prepare_plugin(source: Path | str | None = None) -> Path:
         & {"tests", "__pycache__", ".pytest_cache", ".ruff_cache", ".git", ".claude-plugin"}
     )
     digest = hashlib.sha256(Path(__file__).read_bytes())
+    digest.update(Path(__file__).with_name("agent_profiles.py").read_bytes())
+    digest.update(PARSER_PATH.read_bytes())
     digest.update(json.dumps(manifest, sort_keys=True).encode())
     contents = [(path, path.read_bytes()) for path in files]
     for path, content in contents:
@@ -377,17 +385,25 @@ def prepare_plugin(source: Path | str | None = None) -> Path:
     with tempfile.TemporaryDirectory(prefix="projection-", dir=filesystem_path(generated)) as temporary:
         stage = filesystem_path(Path(temporary) / "dev-team")
         stage.mkdir()
+        agent_models = {}
         for path, content in contents:
             relative = path.relative_to(source)
             destination = stage / relative
+            if relative.parts[0] == "agents" and path.suffix == ".md":
+                name = path.stem
+                if name in agent_models:
+                    raise ValueError(f"{path.name}: duplicate agent identity {name!r}")
+                try:
+                    agent_models[name] = agent_model(content.decode("utf-8"))
+                except ValueError as error:
+                    raise ValueError(f"{path.name}: {error}") from error
+                content, diagnostics = compile_profile(content, path.name)
+                warnings.update(diagnostics)
             destination.parent.mkdir(parents=True, exist_ok=True)
             destination.write_bytes(content)
-        agent_models = {}
-        for path in (stage / "agents").glob("*.md"):
-            try:
-                agent_models[path.stem] = agent_model(path.read_text(encoding="utf-8"))
-            except ValueError as error:
-                raise ValueError(f"{path.name}: {error}") from error
+        for warning in sorted(warnings):
+            if "disabled" in warning:
+                print(f"dev-team-copilot: {warning}", file=sys.stderr)
         shutil.copyfile(__file__, stage / "_copilot_adapter.py")
         (stage / "COPILOT-BOOTSTRAP.txt").write_text(
             BOOTSTRAP,
